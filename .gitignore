@@ -1,0 +1,37 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+
+# Claude Code files
+.claude/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if using npm for scripts)
+node_modules/
+
+# Coverage reports
+coverage/
+lcov.info
+
+# Gas reports
+.gas-snapshot
