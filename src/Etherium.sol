@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IPepeUSD, IUSDC, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IPepeUSD.sol";
+import {IERC20, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IExternalTokens.sol";
 
 /**
  * @title Etherium
@@ -68,8 +68,8 @@ contract Etherium is ERC20, ReentrancyGuard {
     mapping(uint256 => bool) public usedSecrets;
     
     // PepeUSD integration
-    IPepeUSD public constant PEPEUSD = IPepeUSD(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
-    IUSDC public constant USDC = IUSDC(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+    IERC20 public constant PEPEUSD = IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
+    IERC20 public constant USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
     IUniswapV3Factory public constant UNISWAP_V3_FACTORY = IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
     
     struct PepeUSDLock {
