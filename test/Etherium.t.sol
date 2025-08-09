@@ -120,8 +120,8 @@ contract EtheriumTest is Test {
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
         
-        // Check we're in commit phase (first 12 hours)
-        assertTrue(etherium.isCommitPhase());
+        // Check we can commit for current day
+        assertTrue(etherium.canCommitForDay(0));
         
         // Create commitment
         uint256 secret = 12345;
@@ -132,13 +132,13 @@ contract EtheriumTest is Test {
         vm.prank(alice);
         etherium.commitSecret(commitment, stakeAmount);
         
-        // Fast forward to reveal phase
-        vm.warp(block.timestamp + 12 hours + 1);
-        assertTrue(etherium.isRevealPhase());
+        // Fast forward to next day to reveal
+        vm.warp(block.timestamp + 24 hours + 1);
+        assertTrue(etherium.canRevealForDay(0));
         
-        // Reveal
+        // Reveal for day 0
         vm.prank(alice);
-        etherium.revealSecret(secret);
+        etherium.revealSecret(secret, 0);
         
         // Check reveal was recorded
         (, , uint256 revealedSecret, bool revealed, ) = etherium.dayCommitments(0, alice);
@@ -168,14 +168,14 @@ contract EtheriumTest is Test {
         vm.prank(alice);
         etherium.commitSecret(commitment, 100 * 10**12);
         
-        // Fast forward to reveal phase
-        vm.warp(block.timestamp + 12 hours + 1);
+        // Fast forward to day 1 to reveal for day 0
+        vm.warp(block.timestamp + 24 hours + 1);
         
         vm.prank(alice);
-        etherium.revealSecret(secret);
+        etherium.revealSecret(secret, 0);
         
-        // Fast forward to next day
-        vm.warp(block.timestamp + 12 hours + 1);
+        // Fast forward to day 2 to execute lottery for day 0
+        vm.warp(block.timestamp + 24 hours + 1);
         
         // Execute lottery
         etherium.executeLottery();

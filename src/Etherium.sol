@@ -11,18 +11,17 @@ import {IERC20, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IExternalT
  * - 1 ETH = 1,000,000 ETHERIUM (12 decimals)
  * - 1% fee on mint/burn/transfer (0.9% to lottery pool, 0.1% to randomness participants)
  * - Daily lottery for random holder
- * - Commit-reveal scheme for randomness
+ * - Overlapping commit-reveal phases: commit for day N, reveal for day N-1
  * - PepeUSD holders can lock to mint without fee
  * - Efficient winner selection using cumulative sum tree
  */
 contract Etherium is ERC20, ReentrancyGuard {
-    uint256 public constant DECIMALS = 12;
+    uint256 public constant DECIMALS = 12; // Using 12 decimals ensures exact conversion between ETH (18 decimals) and ETHERIUM (12 decimals)
     uint256 public constant ETH_TO_ETHERIUM = 1e6; // 1 ETH = 1,000,000 ETHERIUM
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant LOTTERY_FEE_PERCENT = 90; // 0.9% = 90 basis points
     uint256 public constant RANDOMNESS_FEE_PERCENT = 10; // 0.1% = 10 basis points
-    uint256 public constant BASIS_POINTS = 10000;
-    uint256 public constant DAY_DURATION = 24 hours;
+    uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 7 days;
     uint256 public constant PEPEUSD_LOCK_PERIOD = 7 days;
 
@@ -39,7 +38,6 @@ contract Etherium is ERC20, ReentrancyGuard {
 
     // Lottery state
     uint256 public lastLotteryTime;
-    uint256 public currentDay;
 
     // Commit-reveal state
     struct CommitReveal {
@@ -60,7 +58,6 @@ contract Etherium is ERC20, ReentrancyGuard {
     mapping(uint256 => address) public holderByIndex; // index -> holder address
     mapping(address => uint256) public indexByHolder; // holder address -> index
     mapping(uint256 => uint256) public fenwickTree; // Fenwick tree for balance sums
-    mapping(address => uint256) public holderBalance; // Direct balance tracking
     uint256 public holderCount;
     uint256 public totalHolderBalance;
 
@@ -70,8 +67,6 @@ contract Etherium is ERC20, ReentrancyGuard {
     // PepeUSD integration
     IERC20 public constant PEPEUSD =
         IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
-    IERC20 public constant USDC =
-        IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
     IUniswapV3Factory public constant UNISWAP_V3_FACTORY =
         IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
 
@@ -124,7 +119,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         deploymentTime = block.timestamp;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
         lastLotteryTime = deploymentTime;
-        currentDay = 0;
     }
 
     function decimals() public pure override returns (uint8) {
@@ -167,7 +161,7 @@ contract Etherium is ERC20, ReentrancyGuard {
         // Mint fees directly to pools as ETHERIUM tokens
         _distributeFees(fee);
 
-        _updateHolderBalance(msg.sender, int256(netEtherium));
+        _updateCumulativeBalances(msg.sender, int256(netEtherium));
 
         emit Minted(msg.sender, msg.value, netEtherium, fee);
     }
@@ -202,7 +196,7 @@ contract Etherium is ERC20, ReentrancyGuard {
 
         // Mint without fees
         _mint(msg.sender, etheriumToMint);
-        _updateHolderBalance(msg.sender, int256(etheriumToMint));
+        _updateCumulativeBalances(msg.sender, int256(etheriumToMint));
 
         emit PepeUSDLocked(
             msg.sender,
@@ -233,36 +227,95 @@ contract Etherium is ERC20, ReentrancyGuard {
     }
 
     /**
-     * @dev Get PepeUSD value in ETH using Uniswap V3 TWAP
+     * @dev Get PepeUSD value in ETH using 30-minute TWAP from Uniswap V3
      */
     function getPepeUSDValueInETH(
         uint256 pepeAmount
     ) public view returns (uint256) {
-        // Get PepeUSD/USDC pool
-        address pepeUsdcPool = UNISWAP_V3_FACTORY.getPool(
+        // WETH address on mainnet
+        address WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
+        // Get PepeUSD/WETH pool with 1% fee tier
+        address pepeWethPool = UNISWAP_V3_FACTORY.getPool(
             address(PEPEUSD),
-            address(USDC),
-            3000
-        ); // 0.3% fee tier
-        require(pepeUsdcPool != address(0), "PepeUSD/USDC pool not found");
+            WETH,
+            10_000
+        ); // 1% fee tier
+        require(pepeWethPool != address(0), "PepeUSD/WETH pool not found");
 
-        // Get USDC/ETH pool
-        address usdcEthPool = UNISWAP_V3_FACTORY.getPool(
-            address(USDC),
-            address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2),
-            3000
-        ); // WETH address
-        require(usdcEthPool != address(0), "USDC/ETH pool not found");
+        // Get pool interface to read price
+        IUniswapV3Pool pool = IUniswapV3Pool(pepeWethPool);
 
-        // For simplicity, using current price instead of TWAP
-        // In production, should use proper TWAP calculation
-        uint256 pepeInUsdc = pepeAmount; // Assuming 1:1 for PepeUSD to USDC
+        // Get 30-minute TWAP
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = 1800; // 30 minutes ago
+        secondsAgos[1] = 0;    // current
 
-        // Convert USDC to ETH (simplified - in production use proper price calculation)
-        // Assuming 1 USDC = 0.0003 ETH (example rate)
-        uint256 ethValue = (pepeInUsdc * 3) / 10000; // Simplified conversion
+        (int56[] memory tickCumulatives, ) = pool.observe(secondsAgos);
+        
+        // Calculate average tick over the period
+        int56 tickCumulativeDelta = tickCumulatives[1] - tickCumulatives[0];
+        int24 arithmeticMeanTick = int24(tickCumulativeDelta / 1800);
+        
+        // Calculate sqrt price from tick
+        // sqrtPriceX96 = sqrt(1.0001^tick) * 2^96
+        uint160 sqrtPriceX96 = getSqrtPriceFromTick(arithmeticMeanTick);
+
+        // Determine token ordering
+        address token0 = pool.token0();
+        uint256 ethValue;
+
+        if (token0 == address(PEPEUSD)) {
+            // Price is WETH per PEPEUSD
+            // ethValue = pepeAmount * price
+            ethValue =
+                (pepeAmount * uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) /
+                (1 << 192);
+        } else {
+            // Price is PEPEUSD per WETH (inverted)
+            // ethValue = pepeAmount / price
+            ethValue =
+                (pepeAmount * (1 << 192)) /
+                (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
+        }
 
         return ethValue;
+    }
+    
+    /**
+     * @dev Convert tick to sqrt price
+     * Formula: sqrtPriceX96 = sqrt(1.0001^tick) * 2^96
+     */
+    function getSqrtPriceFromTick(int24 tick) internal pure returns (uint160) {
+        uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
+        
+        // Calculate sqrt(1.0001^tick) using bit manipulation
+        // Based on Uniswap V3 math
+        uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
+        if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
+        if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
+        if (absTick & 0x8 != 0) ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128;
+        if (absTick & 0x10 != 0) ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128;
+        if (absTick & 0x20 != 0) ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128;
+        if (absTick & 0x40 != 0) ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128;
+        if (absTick & 0x80 != 0) ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128;
+        if (absTick & 0x100 != 0) ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128;
+        if (absTick & 0x200 != 0) ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128;
+        if (absTick & 0x400 != 0) ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128;
+        if (absTick & 0x800 != 0) ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128;
+        if (absTick & 0x1000 != 0) ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128;
+        if (absTick & 0x2000 != 0) ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128;
+        if (absTick & 0x4000 != 0) ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128;
+        if (absTick & 0x8000 != 0) ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128;
+        if (absTick & 0x10000 != 0) ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128;
+        if (absTick & 0x20000 != 0) ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128;
+        if (absTick & 0x40000 != 0) ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128;
+        if (absTick & 0x80000 != 0) ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128;
+
+        if (tick > 0) ratio = type(uint256).max / ratio;
+
+        // Shift to get the final result
+        return uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
     }
 
     /**
@@ -283,7 +336,7 @@ contract Etherium is ERC20, ReentrancyGuard {
         _mint(address(this), fee); // Mint fee back to contract
 
         _distributeFees(fee);
-        _updateHolderBalance(msg.sender, -int256(amount));
+        _updateCumulativeBalances(msg.sender, -int256(amount));
 
         (bool success, ) = msg.sender.call{value: ethToReturn}("");
         require(success, "ETH transfer failed");
@@ -320,8 +373,8 @@ contract Etherium is ERC20, ReentrancyGuard {
         _distributeFees(fee);
 
         // Update holder tracking
-        _updateHolderBalance(from, -int256(value));
-        _updateHolderBalance(to, int256(netAmount));
+        _updateCumulativeBalances(from, -int256(value));
+        _updateCumulativeBalances(to, int256(netAmount));
     }
 
     /**
@@ -365,7 +418,7 @@ contract Etherium is ERC20, ReentrancyGuard {
     /**
      * @dev Update holder balance in efficient data structure
      */
-    function _updateHolderBalance(
+    function _updateCumulativeBalances(
         address account,
         int256 balanceChange
     ) internal {
@@ -380,48 +433,43 @@ contract Etherium is ERC20, ReentrancyGuard {
             holderCount++;
             holderByIndex[holderCount] = account;
             indexByHolder[account] = holderCount;
-            holderBalance[account] = newBalance;
-            
+
             // Update Fenwick tree
             _fenwickUpdate(holderCount, int256(newBalance));
             totalHolderBalance += newBalance;
         } else if (newBalance == 0 && currentIndex > 0) {
             // Remove holder
-            uint256 oldBalance = holderBalance[account];
-            
+            uint256 oldBalance = balanceOf(account);
+
             // Update Fenwick tree before removal
             _fenwickUpdate(currentIndex, -int256(oldBalance));
             totalHolderBalance -= oldBalance;
-            
+
             // If not last holder, move last holder to this position
             if (currentIndex < holderCount) {
                 address lastHolder = holderByIndex[holderCount];
-                uint256 lastHolderBalance = holderBalance[lastHolder];
-                
+                uint256 lastHolderBalance = balanceOf(lastHolder);
+
                 // Update Fenwick tree: remove last holder's balance from old position
                 _fenwickUpdate(holderCount, -int256(lastHolderBalance));
-                
+
                 // Move last holder to current position
                 holderByIndex[currentIndex] = lastHolder;
                 indexByHolder[lastHolder] = currentIndex;
-                
+
                 // Update Fenwick tree: add last holder's balance to new position
                 _fenwickUpdate(currentIndex, int256(lastHolderBalance));
             }
-            
+
             // Clean up removed holder
             delete holderByIndex[holderCount];
             delete indexByHolder[account];
-            delete holderBalance[account];
             holderCount--;
         } else if (currentIndex > 0) {
             // Update existing holder
-            uint256 oldBalance = holderBalance[account];
-            holderBalance[account] = newBalance;
-            
             // Update Fenwick tree with the difference
             _fenwickUpdate(currentIndex, balanceChange);
-            
+
             if (balanceChange > 0) {
                 totalHolderBalance += uint256(balanceChange);
             } else {
@@ -430,16 +478,15 @@ contract Etherium is ERC20, ReentrancyGuard {
         }
     }
 
-
     /**
-     * @dev Commit phase for randomness (first 12 hours of the day)
+     * @dev Commit phase for randomness (can commit for the current day)
      */
     function commitSecret(
         bytes32 commitment,
         uint256 etheriumAmount
     ) external nonReentrant {
         uint256 currentDayNumber = getCurrentDay();
-        require(isCommitPhase(), "Not in commit phase");
+        // Can always commit for the current day
         require(etheriumAmount > 0, "Must stake ETHERIUM");
         require(
             dayCommitments[currentDayNumber][msg.sender].commitment == 0,
@@ -452,7 +499,7 @@ contract Etherium is ERC20, ReentrancyGuard {
 
         // Burn the staked ETHERIUM temporarily
         _burn(msg.sender, etheriumAmount);
-        _updateHolderBalance(msg.sender, -int256(etheriumAmount));
+        _updateCumulativeBalances(msg.sender, -int256(etheriumAmount));
 
         dayCommitments[currentDayNumber][msg.sender] = CommitReveal({
             commitment: commitment,
@@ -473,13 +520,20 @@ contract Etherium is ERC20, ReentrancyGuard {
     }
 
     /**
-     * @dev Reveal phase for randomness (last 12 hours of the day)
+     * @dev Reveal phase for randomness (can reveal for the previous day)
      */
-    function revealSecret(uint256 secret) external nonReentrant {
+    function revealSecret(
+        uint256 secret,
+        uint256 dayNumber
+    ) external nonReentrant {
         uint256 currentDayNumber = getCurrentDay();
-        require(isRevealPhase(), "Not in reveal phase");
+        require(
+            dayNumber == currentDayNumber - 1,
+            "Can only reveal for previous day"
+        );
+        require(currentDayNumber > 0, "Cannot reveal on first day");
 
-        CommitReveal storage cr = dayCommitments[currentDayNumber][msg.sender];
+        CommitReveal storage cr = dayCommitments[dayNumber][msg.sender];
         require(cr.commitment != 0, "No commitment found");
         require(!cr.revealed, "Already revealed");
         require(
@@ -491,25 +545,28 @@ contract Etherium is ERC20, ReentrancyGuard {
         cr.revealedSecret = secret;
         cr.revealed = true;
         usedSecrets[secret] = true;
-        dayTotalRevealed[currentDayNumber] += cr.amount;
+        dayTotalRevealed[dayNumber] += cr.amount;
 
-        emit SecretRevealed(msg.sender, currentDayNumber, secret);
+        // Incrementally update the random seed
+        dayRandomSeed[dayNumber] ^= secret;
+
+        emit SecretRevealed(msg.sender, dayNumber, secret);
     }
 
     /**
      * @dev Execute daily lottery with efficient winner selection
      */
     function executeLottery() external nonReentrant {
-        uint256 previousDay = getCurrentDay() - 1;
-        require(!dayLotteryExecuted[previousDay], "Lottery already executed");
+        uint256 currentDayNumber = getCurrentDay();
         require(
-            block.timestamp >= lastLotteryTime + DAY_DURATION,
-            "Day not complete"
+            currentDayNumber >= 2,
+            "Must wait until day 2 to execute first lottery"
         );
+        uint256 lotteryDay = currentDayNumber - 2; // Execute lottery for day that finished revealing
+        require(!dayLotteryExecuted[lotteryDay], "Lottery already executed");
 
-        // Generate random seed from revealed secrets
-        uint256 randomSeed = _generateRandomSeed(previousDay);
-        dayRandomSeed[previousDay] = randomSeed;
+        // Get the random seed that was computed incrementally during reveals
+        uint256 randomSeed = dayRandomSeed[lotteryDay];
 
         // Select winner if there are holders
         uint256 lotteryPoolBalance = balanceOf(LOTTERY_POOL);
@@ -519,13 +576,12 @@ contract Etherium is ERC20, ReentrancyGuard {
             // Transfer prize from lottery pool to winner
             _burn(LOTTERY_POOL, lotteryPoolBalance);
             _mint(winner, lotteryPoolBalance);
-            _updateHolderBalance(winner, int256(lotteryPoolBalance));
-            emit LotteryWon(winner, lotteryPoolBalance, previousDay);
+            _updateCumulativeBalances(winner, int256(lotteryPoolBalance));
+            emit LotteryWon(winner, lotteryPoolBalance, lotteryDay);
         }
 
-        dayLotteryExecuted[previousDay] = true;
+        dayLotteryExecuted[lotteryDay] = true;
         lastLotteryTime = block.timestamp;
-        currentDay++;
     }
 
     /**
@@ -534,7 +590,7 @@ contract Etherium is ERC20, ReentrancyGuard {
     function _selectWinnerEfficient(
         uint256 randomSeed
     ) internal view returns (address) {
-        uint256 winningNumber = randomSeed % totalHolderBalance + 1; // 1-indexed for Fenwick tree
+        uint256 winningNumber = (randomSeed % totalHolderBalance) + 1; // 1-indexed for Fenwick tree
 
         // Binary search for the winner
         uint256 left = 1;
@@ -590,60 +646,32 @@ contract Etherium is ERC20, ReentrancyGuard {
         // Return staked amount + reward
         uint256 totalPayout = cr.amount + userReward;
         _mint(msg.sender, totalPayout);
-        _updateHolderBalance(msg.sender, int256(totalPayout));
+        _updateCumulativeBalances(msg.sender, int256(totalPayout));
 
         emit RandomnessRewardClaimed(msg.sender, day, userReward);
-    }
-
-    /**
-     * @dev Generate random seed from revealed secrets
-     */
-    function _generateRandomSeed(uint256 day) internal view returns (uint256) {
-        uint256 seed = 0;
-        address[] memory participants = dayParticipants[day];
-
-        for (uint256 i = 0; i < participants.length; i++) {
-            CommitReveal memory cr = dayCommitments[day][participants[i]];
-            if (cr.revealed) {
-                seed ^= cr.revealedSecret;
-            }
-        }
-
-        // Add block randomness
-        seed = uint256(
-            keccak256(
-                abi.encodePacked(
-                    seed,
-                    blockhash(block.number - 1),
-                    block.timestamp
-                )
-            )
-        );
-
-        return seed;
     }
 
     /**
      * @dev Get current day number
      */
     function getCurrentDay() public view returns (uint256) {
-        return (block.timestamp - deploymentTime) / DAY_DURATION;
+        return (block.timestamp - deploymentTime) / 24 hours;
     }
 
     /**
-     * @dev Check if in commit phase (first 12 hours)
+     * @dev Check if can commit for a specific day
      */
-    function isCommitPhase() public view returns (bool) {
-        uint256 dayProgress = (block.timestamp - deploymentTime) % DAY_DURATION;
-        return dayProgress < DAY_DURATION / 2;
+    function canCommitForDay(uint256 dayNumber) public view returns (bool) {
+        uint256 currentDayNumber = getCurrentDay();
+        return dayNumber == currentDayNumber;
     }
 
     /**
-     * @dev Check if in reveal phase (last 12 hours)
+     * @dev Check if can reveal for a specific day
      */
-    function isRevealPhase() public view returns (bool) {
-        uint256 dayProgress = (block.timestamp - deploymentTime) % DAY_DURATION;
-        return dayProgress >= DAY_DURATION / 2;
+    function canRevealForDay(uint256 dayNumber) public view returns (bool) {
+        uint256 currentDayNumber = getCurrentDay();
+        return currentDayNumber > 0 && dayNumber == currentDayNumber - 1;
     }
 
     /**
@@ -661,6 +689,27 @@ contract Etherium is ERC20, ReentrancyGuard {
     ) external view returns (address holder, uint256 balance) {
         require(index > 0 && index <= holderCount, "Index out of bounds");
         address holderAddress = holderByIndex[index];
-        return (holderAddress, holderBalance[holderAddress]);
+        return (holderAddress, balanceOf(holderAddress));
+    }
+
+    /**
+     * @dev Get current lottery pool balance
+     */
+    function currentLotteryPool() external view returns (uint256) {
+        return balanceOf(LOTTERY_POOL);
+    }
+
+    /**
+     * @dev Get current randomness pool balance
+     */
+    function currentRandomnessPool() external view returns (uint256) {
+        return balanceOf(RANDOMNESS_POOL);
+    }
+
+    /**
+     * @dev Check if an address is a holder
+     */
+    function isHolder(address account) external view returns (bool) {
+        return indexByHolder[account] > 0;
     }
 }

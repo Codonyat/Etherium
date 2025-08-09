@@ -22,6 +22,9 @@ interface IUniswapV3Pool {
         bool unlocked
     );
     
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    
     function observations(uint256 index) external view returns (
         uint32 blockTimestamp,
         int56 tickCumulative,
