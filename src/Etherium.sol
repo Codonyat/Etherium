@@ -4,11 +4,12 @@ pragma solidity ^0.8.20;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IExternalTokens.sol";
+import {TickMath} from "v3-core/contracts/libraries/TickMath.sol";
 
 /**
  * @title Etherium
  * @dev ERC20 token backed by ETH with daily lottery and commit-reveal randomness
- * - 1 ETH = 1,000,000 ETHERIUM (12 decimals)
+ * - 1 ETH = 1 ETHERIUM (18 decimals)
  * - 1% fee on mint/burn/transfer (0.9% to lottery pool, 0.1% to randomness participants)
  * - Daily lottery for random holder
  * - Overlapping commit-reveal phases: commit for day N, reveal for day N-1
@@ -16,8 +17,8 @@ import {IERC20, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IExternalT
  * - Efficient winner selection using cumulative sum tree
  */
 contract Etherium is ERC20, ReentrancyGuard {
-    uint256 public constant DECIMALS = 12; // Using 12 decimals ensures exact conversion between ETH (18 decimals) and ETHERIUM (12 decimals)
-    uint256 public constant ETH_TO_ETHERIUM = 1e6; // 1 ETH = 1,000,000 ETHERIUM
+    // Conversion: 1 ETH = 1 ETHERIUM (both 18 decimals)
+    uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant LOTTERY_FEE_PERCENT = 90; // 0.9% = 90 basis points
     uint256 public constant RANDOMNESS_FEE_PERCENT = 10; // 0.1% = 10 basis points
@@ -34,7 +35,6 @@ contract Etherium is ERC20, ReentrancyGuard {
     uint256 public immutable deploymentTime;
     uint256 public immutable mintingEndTime;
     uint256 public maxSupplyEver; // Set after minting period based on what was minted
-    uint256 public totalEthDeposited; // Track total ETH deposited during minting period
 
     // Lottery state
     uint256 public lastLotteryTime;
@@ -131,29 +131,25 @@ contract Etherium is ERC20, ReentrancyGuard {
     function mint() external payable nonReentrant {
         require(msg.value > 0, "Must send ETH");
 
-        uint256 etheriumToMint = (msg.value *
-            ETH_TO_ETHERIUM *
-            10 ** DECIMALS) / 1e18;
-        uint256 fee = (etheriumToMint * FEE_PERCENT) / BASIS_POINTS;
-        uint256 netEtherium = etheriumToMint - fee;
+        // Check if minting period has ended and set max supply if needed
+        if (block.timestamp > mintingEndTime && maxSupplyEver == 0) {
+            // Set max supply based on total supply at end of minting period
+            // 1:1 conversion - max supply equals total ETHERIUM minted
+            maxSupplyEver = totalSupply();
+        }
 
-        if (block.timestamp <= mintingEndTime) {
-            // During minting period: no limit, mint full amount including fees
-            totalEthDeposited += msg.value; // Track total ETH deposited
-        } else {
-            // After minting period: can only mint up to maxSupplyEver
-            if (maxSupplyEver == 0) {
-                // Set max supply based on total ETH deposited during minting period
-                maxSupplyEver =
-                    (totalEthDeposited * ETH_TO_ETHERIUM * 10 ** DECIMALS) /
-                    1e18;
-            }
+        // Calculate fee and net amount (1:1 conversion with ETH)
+        uint256 fee = (msg.value * FEE_PERCENT) / BASIS_POINTS;
+        uint256 netEtherium = msg.value - fee;
 
+        // After minting period: enforce max supply limit
+        if (block.timestamp > mintingEndTime) {
             require(
                 totalSupply() + netEtherium <= maxSupplyEver,
                 "Max supply reached"
             );
         }
+        // During minting period: no limit on minting
 
         // Mint net amount to user
         _mint(msg.sender, netEtherium);
@@ -182,26 +178,24 @@ contract Etherium is ERC20, ReentrancyGuard {
             "PepeUSD transfer failed"
         );
 
-        // Get PepeUSD value in ETH using TWAP
+        // Get PepeUSD value in ETH using TWAP (1:1 with ETHERIUM)
         uint256 ethValue = getPepeUSDValueInETH(pepeAmount);
-        uint256 etheriumToMint = (ethValue * ETH_TO_ETHERIUM * 10 ** DECIMALS) /
-            1e18;
 
         // Store lock info
         pepeUSDLocks[msg.sender] = PepeUSDLock({
             amount: pepeAmount,
             unlockTime: block.timestamp + PEPEUSD_LOCK_PERIOD,
-            etheriumMinted: etheriumToMint
+            etheriumMinted: ethValue
         });
 
         // Mint without fees
-        _mint(msg.sender, etheriumToMint);
-        _updateCumulativeBalances(msg.sender, int256(etheriumToMint));
+        _mint(msg.sender, ethValue);
+        _updateCumulativeBalances(msg.sender, int256(ethValue));
 
         emit PepeUSDLocked(
             msg.sender,
             pepeAmount,
-            etheriumToMint,
+            ethValue,
             block.timestamp + PEPEUSD_LOCK_PERIOD
         );
     }
@@ -249,17 +243,17 @@ contract Etherium is ERC20, ReentrancyGuard {
         // Get 30-minute TWAP
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = 1800; // 30 minutes ago
-        secondsAgos[1] = 0;    // current
+        secondsAgos[1] = 0; // current
 
         (int56[] memory tickCumulatives, ) = pool.observe(secondsAgos);
-        
+
         // Calculate average tick over the period
         int56 tickCumulativeDelta = tickCumulatives[1] - tickCumulatives[0];
         int24 arithmeticMeanTick = int24(tickCumulativeDelta / 1800);
-        
+
         // Calculate sqrt price from tick
         // sqrtPriceX96 = sqrt(1.0001^tick) * 2^96
-        uint160 sqrtPriceX96 = getSqrtPriceFromTick(arithmeticMeanTick);
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
 
         // Determine token ordering
         address token0 = pool.token0();
@@ -281,42 +275,6 @@ contract Etherium is ERC20, ReentrancyGuard {
 
         return ethValue;
     }
-    
-    /**
-     * @dev Convert tick to sqrt price
-     * Formula: sqrtPriceX96 = sqrt(1.0001^tick) * 2^96
-     */
-    function getSqrtPriceFromTick(int24 tick) internal pure returns (uint160) {
-        uint256 absTick = tick < 0 ? uint256(uint24(-tick)) : uint256(uint24(tick));
-        
-        // Calculate sqrt(1.0001^tick) using bit manipulation
-        // Based on Uniswap V3 math
-        uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
-        if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
-        if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
-        if (absTick & 0x8 != 0) ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128;
-        if (absTick & 0x10 != 0) ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128;
-        if (absTick & 0x20 != 0) ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128;
-        if (absTick & 0x40 != 0) ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128;
-        if (absTick & 0x80 != 0) ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128;
-        if (absTick & 0x100 != 0) ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128;
-        if (absTick & 0x200 != 0) ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128;
-        if (absTick & 0x400 != 0) ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128;
-        if (absTick & 0x800 != 0) ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128;
-        if (absTick & 0x1000 != 0) ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128;
-        if (absTick & 0x2000 != 0) ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128;
-        if (absTick & 0x4000 != 0) ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128;
-        if (absTick & 0x8000 != 0) ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128;
-        if (absTick & 0x10000 != 0) ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128;
-        if (absTick & 0x20000 != 0) ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128;
-        if (absTick & 0x40000 != 0) ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128;
-        if (absTick & 0x80000 != 0) ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128;
-
-        if (tick > 0) ratio = type(uint256).max / ratio;
-
-        // Shift to get the final result
-        return uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
-    }
 
     /**
      * @dev Redeem ETHERIUM for ETH
@@ -325,23 +283,27 @@ contract Etherium is ERC20, ReentrancyGuard {
         require(amount > 0, "Amount must be greater than 0");
         require(balanceOf(msg.sender) >= amount, "Insufficient balance");
 
+        // Check if minting period has ended and set max supply if needed
+        if (block.timestamp > mintingEndTime && maxSupplyEver == 0) {
+            // Set max supply based on total supply at end of minting period
+            maxSupplyEver = totalSupply();
+        }
+
         uint256 fee = (amount * FEE_PERCENT) / BASIS_POINTS;
         uint256 netEtherium = amount - fee;
-        uint256 ethToReturn = (netEtherium * 1e18) /
-            (ETH_TO_ETHERIUM * 10 ** DECIMALS);
 
         // User loses full amount from their balance, but only net amount burned from supply
-        // We do this by burning the full amount, then minting back the fee
+        // We do this by burning the full amount, then minting back the fee to the pools
         _burn(msg.sender, amount);
-        _mint(address(this), fee); // Mint fee back to contract
 
         _distributeFees(fee);
         _updateCumulativeBalances(msg.sender, -int256(amount));
 
-        (bool success, ) = msg.sender.call{value: ethToReturn}("");
+        // Transfer ETH back to user (1:1 conversion)
+        (bool success, ) = msg.sender.call{value: netEtherium}("");
         require(success, "ETH transfer failed");
 
-        emit Redeemed(msg.sender, amount, ethToReturn, fee);
+        emit Redeemed(msg.sender, amount, netEtherium, fee);
     }
 
     /**
@@ -362,6 +324,10 @@ contract Etherium is ERC20, ReentrancyGuard {
         uint256 fee = (value * FEE_PERCENT) / BASIS_POINTS;
         uint256 netAmount = value - fee;
 
+        // Update holder tracking BEFORE changing balances
+        _updateCumulativeBalances(from, -int256(value));
+        _updateCumulativeBalances(to, int256(netAmount));
+
         // Deduct full amount from sender
         // Update sender balance (deduct full amount)
         _burn(from, value);
@@ -371,10 +337,6 @@ contract Etherium is ERC20, ReentrancyGuard {
 
         // Add fee to pools
         _distributeFees(fee);
-
-        // Update holder tracking
-        _updateCumulativeBalances(from, -int256(value));
-        _updateCumulativeBalances(to, int256(netAmount));
     }
 
     /**
@@ -397,7 +359,10 @@ contract Etherium is ERC20, ReentrancyGuard {
             if (delta > 0) {
                 fenwickTree[index] += uint256(delta);
             } else {
-                fenwickTree[index] -= uint256(-delta);
+                uint256 decrease = uint256(-delta);
+                fenwickTree[index] = fenwickTree[index] > decrease
+                    ? fenwickTree[index] - decrease
+                    : 0;
             }
             index += index & uint256(-int256(index)); // index & -index gives lowest set bit
         }
@@ -425,8 +390,19 @@ contract Etherium is ERC20, ReentrancyGuard {
         if (account.code.length > 0) return; // Skip contracts
         if (account == LOTTERY_POOL || account == RANDOMNESS_POOL) return; // Skip synthetic addresses
 
-        uint256 newBalance = balanceOf(account);
+        uint256 currentBalance = balanceOf(account);
         uint256 currentIndex = indexByHolder[account];
+
+        // Calculate what the new balance will be after the change
+        uint256 newBalance;
+        if (balanceChange > 0) {
+            newBalance = currentBalance + uint256(balanceChange);
+        } else {
+            uint256 decrease = uint256(-balanceChange);
+            newBalance = currentBalance > decrease
+                ? currentBalance - decrease
+                : 0;
+        }
 
         if (newBalance > 0 && currentIndex == 0) {
             // Add new holder
@@ -438,12 +414,13 @@ contract Etherium is ERC20, ReentrancyGuard {
             _fenwickUpdate(holderCount, int256(newBalance));
             totalHolderBalance += newBalance;
         } else if (newBalance == 0 && currentIndex > 0) {
-            // Remove holder
-            uint256 oldBalance = balanceOf(account);
+            // Remove holder - use the current balance before removal
 
             // Update Fenwick tree before removal
-            _fenwickUpdate(currentIndex, -int256(oldBalance));
-            totalHolderBalance -= oldBalance;
+            _fenwickUpdate(currentIndex, -int256(currentBalance));
+            totalHolderBalance = totalHolderBalance > currentBalance
+                ? totalHolderBalance - currentBalance
+                : 0;
 
             // If not last holder, move last holder to this position
             if (currentIndex < holderCount) {
@@ -473,7 +450,10 @@ contract Etherium is ERC20, ReentrancyGuard {
             if (balanceChange > 0) {
                 totalHolderBalance += uint256(balanceChange);
             } else {
-                totalHolderBalance -= uint256(-balanceChange);
+                uint256 decrease = uint256(-balanceChange);
+                totalHolderBalance = totalHolderBalance > decrease
+                    ? totalHolderBalance - decrease
+                    : 0;
             }
         }
     }

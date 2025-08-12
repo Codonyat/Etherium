@@ -24,17 +24,17 @@ contract EtheriumTest is Test {
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
         
-        // 1 ETH = 1,000,000 ETHERIUM (with 12 decimals)
+        // 1 ETH = 1 ETHERIUM (both 18 decimals)
         // During minting period: Alice gets 99%, fees are minted too
-        uint256 expectedBalance = 990_000 * 10**12;
+        uint256 expectedBalance = 0.99 ether; // 99% of 1 ETH
         assertEq(etherium.balanceOf(alice), expectedBalance);
         
-        // Total supply should be full 1M (alice's 990k + 10k fees minted)
-        uint256 expectedTotalSupply = 1_000_000 * 10**12;
+        // Total supply should be full 1 ETH (alice's 0.99 + 0.01 fees minted)
+        uint256 expectedTotalSupply = 1 ether;
         assertEq(etherium.totalSupply(), expectedTotalSupply);
         
         // Check that fee was distributed to pools
-        uint256 totalFee = 10_000 * 10**12; // 1% of 1,000,000
+        uint256 totalFee = 0.01 ether; // 1% of 1 ETH
         uint256 expectedLotteryPool = (totalFee * 90) / 100; // 0.9%
         uint256 expectedRandomnessPool = (totalFee * 10) / 100; // 0.1%
         
@@ -61,7 +61,7 @@ contract EtheriumTest is Test {
         // Check ETH was returned (minus fee)
         uint256 fee = (redeemAmount * 100) / 10000; // 1% fee
         uint256 netAmount = redeemAmount - fee;
-        uint256 expectedEth = (netAmount * 1e18) / (1e6 * 10**12);
+        uint256 expectedEth = netAmount; // 1:1 conversion
         
         assertApproxEqAbs(
             contractBalanceBefore - address(etherium).balance,
@@ -76,7 +76,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 1 ether}();
         
         uint256 aliceBalanceBefore = etherium.balanceOf(alice);
-        uint256 transferAmount = 100_000 * 10**12; // 100,000 ETHERIUM
+        uint256 transferAmount = 0.1 ether; // 0.1 ETHERIUM
         
         // Transfer to bob
         vm.prank(alice);
@@ -126,7 +126,7 @@ contract EtheriumTest is Test {
         // Create commitment
         uint256 secret = 12345;
         bytes32 commitment = keccak256(abi.encodePacked(secret, alice));
-        uint256 stakeAmount = 1000 * 10**12;
+        uint256 stakeAmount = 0.001 ether; // 0.001 ETHERIUM
         
         // Commit
         vm.prank(alice);
@@ -166,7 +166,7 @@ contract EtheriumTest is Test {
         bytes32 commitment = keccak256(abi.encodePacked(secret, alice));
         
         vm.prank(alice);
-        etherium.commitSecret(commitment, 100 * 10**12);
+        etherium.commitSecret(commitment, 0.0001 ether); // 0.0001 ETHERIUM
         
         // Fast forward to day 1 to reveal for day 0
         vm.warp(block.timestamp + 24 hours + 1);
@@ -195,8 +195,8 @@ contract EtheriumTest is Test {
         etherium.mint{value: 10 ether}();
         
         uint256 totalSupplyAfterMinting = etherium.totalSupply();
-        // Should be 10M ETHERIUM (including fees minted during minting period)
-        uint256 expectedSupply = 10 * 1000000 * 10**12; // 10M ETHERIUM
+        // Should be 10 ETHERIUM (including fees minted during minting period)
+        uint256 expectedSupply = 10 ether; // 10 ETHERIUM
         assertEq(totalSupplyAfterMinting, expectedSupply);
         
         // Fast forward past minting period
@@ -213,16 +213,16 @@ contract EtheriumTest is Test {
         
         // After redemption, minting should work up to original max
         vm.prank(alice);
-        etherium.redeem(1000000 * 10**12); // Redeem 1M ETHERIUM
+        etherium.redeem(1 ether); // Redeem 1 ETHERIUM
         
         // After redemption: 
-        // - Alice loses 1M from balance
-        // - Only 0.99M actually burned from total supply (0.01M fee stays)
-        // - Total supply now: 10M - 0.99M = 9.01M
-        // - Max supply still: 10M
-        // - Available to mint: 10M - 9.01M = 0.99M ETHERIUM
+        // - Alice loses 1 ETHERIUM from balance
+        // - Only 0.99 ETHERIUM actually burned from total supply (0.01 fee stays)
+        // - Total supply now: 10 - 0.99 = 9.01 ETHERIUM
+        // - Max supply still: 10 ETHERIUM
+        // - Available to mint: 10 - 9.01 = 0.99 ETHERIUM
         
-        assertEq(etherium.totalSupply(), expectedSupply - 990000 * 10**12);
+        assertEq(etherium.totalSupply(), expectedSupply - 0.99 ether);
         
         // Bob can now mint up to the redeemed capacity
         vm.prank(bob);
