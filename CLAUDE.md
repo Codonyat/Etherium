@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Etherium is a Solidity smart contract project implementing an ERC20 token backed by ETH with daily lottery mechanics and decentralized randomness generation. The token uses a 1:1,000,000 ratio (1 ETH = 1M ETHERIUM with 12 decimals) and implements a 1% fee structure on all operations.
+Etherium is a Solidity smart contract project implementing an ERC20 token backed by ETH with daily lottery mechanics and decentralized randomness generation. The token uses a 1:1 ratio (1 ETH = 1 ETHERIUM, both with 18 decimals) and implements a 1% fee structure on all operations.
 
 ## Development Commands
 
@@ -38,6 +38,11 @@ forge clean && forge build
 ### Core Contract Structure
 - **Main Contract**: `src/Etherium.sol` - Inherits from OpenZeppelin's ERC20 and ReentrancyGuard
 - **Fee System**: 1% total fee split into 0.9% lottery pool and 0.1% randomness participant rewards
+- **PepeUSD Lock Mechanism**: 
+  - Users can lock 100 PepeUSD during minting period (each lock enables one fee-free mint)
+  - Multiple locks allowed per user (e.g., lock 300 PepeUSD for 3 fee-free mints)
+  - Call `mintFeeFree()` to use a lock and mint without fees
+  - All locks unlockable after 1 month from deployment
 - **Holder Tracking**: Uses Fenwick tree (Binary Indexed Tree) for O(log n) cumulative balance queries, enabling efficient lottery winner selection
 - **Randomness**: Commit-reveal scheme with 24-hour cycles (12h commit, 12h reveal phases)
 
@@ -51,7 +56,7 @@ forge clean && forge build
 
 ### External Dependencies
 - **OpenZeppelin Contracts**: ERC20 base implementation and ReentrancyGuard
-- **Uniswap V3**: For PepeUSD/USDC TWAP price calculations
+- **PepeUSD Token**: ERC20 token at 0xed7fd16423Bc19b9143313ac5E4B7F731D714e97 for fee exemption mechanism
 - **Forge-std**: Testing framework and utilities
 
 ## Testing Strategy

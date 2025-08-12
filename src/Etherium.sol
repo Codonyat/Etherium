@@ -3,8 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IERC20, IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IExternalTokens.sol";
-import {TickMath} from "v3-core/contracts/libraries/TickMath.sol";
+import {IERC20} from "./interfaces/IExternalTokens.sol";
 
 /**
  * @title Etherium
@@ -13,7 +12,7 @@ import {TickMath} from "v3-core/contracts/libraries/TickMath.sol";
  * - 1% fee on mint/burn/transfer (0.9% to lottery pool, 0.1% to randomness participants)
  * - Daily lottery for random holder
  * - Overlapping commit-reveal phases: commit for day N, reveal for day N-1
- * - PepeUSD holders can lock to mint without fee
+ * - Users can lock 100 PepeUSD during minting period to mint without fees
  * - Efficient winner selection using cumulative sum tree
  */
 contract Etherium is ERC20, ReentrancyGuard {
@@ -24,7 +23,8 @@ contract Etherium is ERC20, ReentrancyGuard {
     uint256 public constant RANDOMNESS_FEE_PERCENT = 10; // 0.1% = 10 basis points
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 7 days;
-    uint256 public constant PEPEUSD_LOCK_PERIOD = 7 days;
+    uint256 public constant PEPEUSD_LOCK_AMOUNT = 100 ether; // 100 PepeUSD (18 decimals)
+    uint256 public constant PEPEUSD_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic addresses for pools
     address public constant LOTTERY_POOL =
@@ -48,35 +48,28 @@ contract Etherium is ERC20, ReentrancyGuard {
         bool claimed;
     }
 
-    mapping(uint256 => mapping(address => CommitReveal)) public dayCommitments;
-    mapping(uint256 => uint256) public dayRandomSeed;
-    mapping(uint256 => address[]) public dayParticipants;
-    mapping(uint256 => uint256) public dayTotalRevealed;
-    mapping(uint256 => bool) public dayLotteryExecuted;
+    mapping(uint256 day => mapping(address participant => CommitReveal)) public dayCommitments;
+    mapping(uint256 day => uint256 seed) public dayRandomSeed;
+    mapping(uint256 day => address[] participants) public dayParticipants;
+    mapping(uint256 day => uint256 totalRevealed) public dayTotalRevealed;
+    mapping(uint256 day => bool executed) public dayLotteryExecuted;
 
     // Efficient holder tracking using Fenwick tree
-    mapping(uint256 => address) public holderByIndex; // index -> holder address
-    mapping(address => uint256) public indexByHolder; // holder address -> index
-    mapping(uint256 => uint256) public fenwickTree; // Fenwick tree for balance sums
+    mapping(uint256 index => address holder) public holderByIndex;
+    mapping(address holder => uint256 index) public indexByHolder;
+    mapping(uint256 index => uint256 sum) public fenwickTree;
     uint256 public holderCount;
     uint256 public totalHolderBalance;
 
     // Used secrets tracking to prevent reuse
-    mapping(uint256 => bool) public usedSecrets;
+    mapping(uint256 secret => bool used) public usedSecrets;
 
     // PepeUSD integration
     IERC20 public constant PEPEUSD =
         IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
-    IUniswapV3Factory public constant UNISWAP_V3_FACTORY =
-        IUniswapV3Factory(0x1F98431c8aD98523631AE4a59f267346ea31F984);
 
-    struct PepeUSDLock {
-        uint256 amount;
-        uint256 unlockTime;
-        uint256 etheriumMinted;
-    }
-
-    mapping(address => PepeUSDLock) public pepeUSDLocks;
+    // Track PepeUSD locked per user during minting period
+    mapping(address user => uint256 amount) public pepeUSDLocked;
 
     event Minted(
         address indexed to,
@@ -126,19 +119,25 @@ contract Etherium is ERC20, ReentrancyGuard {
     }
 
     /**
-     * @dev Mint ETHERIUM by depositing ETH
+     * @dev Check and set max supply after minting period ends
      */
-    function mint() external payable nonReentrant {
-        require(msg.value > 0, "Must send ETH");
-
-        // Check if minting period has ended and set max supply if needed
+    function _checkAndSetMaxSupply() internal {
         if (block.timestamp > mintingEndTime && maxSupplyEver == 0) {
             // Set max supply based on total supply at end of minting period
             // 1:1 conversion - max supply equals total ETHERIUM minted
             maxSupplyEver = totalSupply();
         }
+    }
 
-        // Calculate fee and net amount (1:1 conversion with ETH)
+    /**
+     * @dev Mint ETHERIUM by depositing ETH (standard minting with fees)
+     */
+    function mint() external payable nonReentrant {
+        require(msg.value > 0, "Must send ETH");
+
+        _checkAndSetMaxSupply();
+
+        // Apply fee for normal minting
         uint256 fee = (msg.value * FEE_PERCENT) / BASIS_POINTS;
         uint256 netEtherium = msg.value - fee;
 
@@ -163,117 +162,76 @@ contract Etherium is ERC20, ReentrancyGuard {
     }
 
     /**
-     * @dev Lock PepeUSD to mint ETHERIUM without fees
+     * @dev Mint ETHERIUM fee-free by locking 100 PepeUSD
      */
-    function lockPepeUSDAndMint(uint256 pepeAmount) external nonReentrant {
-        require(pepeAmount > 0, "Amount must be greater than 0");
+    function mintFeeFree() external payable nonReentrant {
+        require(msg.value > 0, "Must send ETH");
         require(
-            pepeUSDLocks[msg.sender].amount == 0,
-            "Already have locked PepeUSD"
+            block.timestamp <= mintingEndTime,
+            "Fee-free minting only during minting period"
         );
 
-        // Transfer PepeUSD from user
+        // Transfer 100 PepeUSD from user to lock
         require(
-            PEPEUSD.transferFrom(msg.sender, address(this), pepeAmount),
+            PEPEUSD.transferFrom(
+                msg.sender,
+                address(this),
+                PEPEUSD_LOCK_AMOUNT
+            ),
             "PepeUSD transfer failed"
         );
 
-        // Get PepeUSD value in ETH using TWAP (1:1 with ETHERIUM)
-        uint256 ethValue = getPepeUSDValueInETH(pepeAmount);
+        // Track locked amount
+        pepeUSDLocked[msg.sender] += PEPEUSD_LOCK_AMOUNT;
 
-        // Store lock info
-        pepeUSDLocks[msg.sender] = PepeUSDLock({
-            amount: pepeAmount,
-            unlockTime: block.timestamp + PEPEUSD_LOCK_PERIOD,
-            etheriumMinted: ethValue
-        });
+        _checkAndSetMaxSupply();
 
         // Mint without fees
-        _mint(msg.sender, ethValue);
-        _updateCumulativeBalances(msg.sender, int256(ethValue));
+        uint256 netEtherium = msg.value;
+
+        // After minting period: enforce max supply limit
+        if (block.timestamp > mintingEndTime) {
+            require(
+                totalSupply() + netEtherium <= maxSupplyEver,
+                "Max supply reached"
+            );
+        }
+
+        // Mint full amount to user (no fees)
+        _mint(msg.sender, netEtherium);
+        _updateCumulativeBalances(msg.sender, int256(netEtherium));
 
         emit PepeUSDLocked(
             msg.sender,
-            pepeAmount,
-            ethValue,
-            block.timestamp + PEPEUSD_LOCK_PERIOD
+            PEPEUSD_LOCK_AMOUNT,
+            netEtherium,
+            deploymentTime + PEPEUSD_UNLOCK_TIME
         );
+
+        emit Minted(msg.sender, msg.value, netEtherium, 0);
     }
 
     /**
-     * @dev Unlock PepeUSD after lock period
+     * @dev Unlock all PepeUSD after 1 month from deployment
      */
     function unlockPepeUSD() external nonReentrant {
-        PepeUSDLock memory lock = pepeUSDLocks[msg.sender];
-        require(lock.amount > 0, "No locked PepeUSD");
-        require(block.timestamp >= lock.unlockTime, "Still in lock period");
-
-        // Clear lock
-        delete pepeUSDLocks[msg.sender];
-
-        // Return PepeUSD
+        uint256 lockedAmount = pepeUSDLocked[msg.sender];
+        require(lockedAmount > 0, "No locked PepeUSD");
         require(
-            PEPEUSD.transfer(msg.sender, lock.amount),
+            block.timestamp >= deploymentTime + PEPEUSD_UNLOCK_TIME,
+            "Still in lock period (1 month from deployment)"
+        );
+
+        // Clear user's locked amount
+        pepeUSDLocked[msg.sender] = 0;
+
+        // Return all locked PepeUSD
+        require(
+            PEPEUSD.transfer(msg.sender, lockedAmount),
             "PepeUSD transfer failed"
         );
 
-        emit PepeUSDUnlocked(msg.sender, lock.amount);
-    }
-
-    /**
-     * @dev Get PepeUSD value in ETH using 30-minute TWAP from Uniswap V3
-     */
-    function getPepeUSDValueInETH(
-        uint256 pepeAmount
-    ) public view returns (uint256) {
-        // WETH address on mainnet
-        address WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-
-        // Get PepeUSD/WETH pool with 1% fee tier
-        address pepeWethPool = UNISWAP_V3_FACTORY.getPool(
-            address(PEPEUSD),
-            WETH,
-            10_000
-        ); // 1% fee tier
-        require(pepeWethPool != address(0), "PepeUSD/WETH pool not found");
-
-        // Get pool interface to read price
-        IUniswapV3Pool pool = IUniswapV3Pool(pepeWethPool);
-
-        // Get 30-minute TWAP
-        uint32[] memory secondsAgos = new uint32[](2);
-        secondsAgos[0] = 1800; // 30 minutes ago
-        secondsAgos[1] = 0; // current
-
-        (int56[] memory tickCumulatives, ) = pool.observe(secondsAgos);
-
-        // Calculate average tick over the period
-        int56 tickCumulativeDelta = tickCumulatives[1] - tickCumulatives[0];
-        int24 arithmeticMeanTick = int24(tickCumulativeDelta / 1800);
-
-        // Calculate sqrt price from tick
-        // sqrtPriceX96 = sqrt(1.0001^tick) * 2^96
-        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
-
-        // Determine token ordering
-        address token0 = pool.token0();
-        uint256 ethValue;
-
-        if (token0 == address(PEPEUSD)) {
-            // Price is WETH per PEPEUSD
-            // ethValue = pepeAmount * price
-            ethValue =
-                (pepeAmount * uint256(sqrtPriceX96) * uint256(sqrtPriceX96)) /
-                (1 << 192);
-        } else {
-            // Price is PEPEUSD per WETH (inverted)
-            // ethValue = pepeAmount / price
-            ethValue =
-                (pepeAmount * (1 << 192)) /
-                (uint256(sqrtPriceX96) * uint256(sqrtPriceX96));
-        }
-
-        return ethValue;
+        emit PepeUSDUnlocked(msg.sender, lockedAmount);
     }
 
     /**
@@ -283,11 +241,7 @@ contract Etherium is ERC20, ReentrancyGuard {
         require(amount > 0, "Amount must be greater than 0");
         require(balanceOf(msg.sender) >= amount, "Insufficient balance");
 
-        // Check if minting period has ended and set max supply if needed
-        if (block.timestamp > mintingEndTime && maxSupplyEver == 0) {
-            // Set max supply based on total supply at end of minting period
-            maxSupplyEver = totalSupply();
-        }
+        _checkAndSetMaxSupply();
 
         uint256 fee = (amount * FEE_PERCENT) / BASIS_POINTS;
         uint256 netEtherium = amount - fee;
