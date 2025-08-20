@@ -33,13 +33,10 @@ contract EtheriumTest is Test {
         uint256 expectedTotalSupply = 1 ether;
         assertEq(etherium.totalSupply(), expectedTotalSupply);
         
-        // Check that fee was distributed to pools
+        // Check that fee was distributed to lottery pool
         uint256 totalFee = 0.01 ether; // 1% of 1 ETH
-        uint256 expectedLotteryPool = (totalFee * 90) / 100; // 0.9%
-        uint256 expectedRandomnessPool = (totalFee * 10) / 100; // 0.1%
         
-        assertEq(etherium.currentLotteryPool(), expectedLotteryPool);
-        assertEq(etherium.currentRandomnessPool(), expectedRandomnessPool);
+        assertEq(etherium.currentLotteryPool(), totalFee);
     }
     
     function testRedeemWithFee() public {
@@ -115,38 +112,46 @@ contract EtheriumTest is Test {
         assertTrue(etherium.isHolder(bob));
     }
     
-    function testCommitRevealFlow() public {
-        // Mint some ETHERIUM first
+    function testPrevrandaoLottery() public {
+        // Mint some ETHERIUM to create holders
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
         
-        // Check we can commit for current day
-        assertTrue(etherium.canCommitForDay(0));
+        vm.prank(bob);
+        etherium.mint{value: 1 ether}();
         
-        // Create commitment
-        uint256 secret = 12345;
-        bytes32 commitment = keccak256(abi.encodePacked(secret, alice));
-        uint256 stakeAmount = 0.001 ether; // 0.001 ETHERIUM
+        // Record initial lottery pool
+        uint256 lotteryPoolBefore = etherium.currentLotteryPool();
+        assertTrue(lotteryPoolBefore > 0);
         
-        // Commit
-        vm.prank(alice);
-        etherium.commitSecret(commitment, stakeAmount);
-        
-        // Fast forward to next day to reveal
+        // Fast forward to day 1 to trigger lottery for day 0
         vm.warp(block.timestamp + 24 hours + 1);
-        assertTrue(etherium.canRevealForDay(0));
         
-        // Reveal for day 0
-        vm.prank(alice);
-        etherium.revealSecret(secret, 0);
+        // First call should take snapshot and revert
+        vm.expectRevert("Snapshot taken, wait for block gap before executing");
+        etherium.executeLottery();
         
-        // Check reveal was recorded
-        (, , uint256 revealedSecret, bool revealed, ) = etherium.dayCommitments(0, alice);
-        assertTrue(revealed);
-        assertEq(revealedSecret, secret);
+        // Snapshot is not taken due to revert, so we need to trigger it via a different transaction
+        // We'll mint which calls _tryExecuteLottery internally
+        vm.prank(charlie);
+        etherium.mint{value: 0.1 ether}(); // This will take the snapshot internally
+        
+        // Check snapshot was taken for day 0 (previous day)
+        uint256 snapshotBlock = etherium.daySnapshotBlock(0);
+        assertTrue(snapshotBlock > 0);
+        
+        // Mine blocks to pass the gap
+        vm.roll(block.number + 11); // BLOCK_GAP is 10
+        
+        // Now lottery should execute
+        etherium.executeLottery();
+        
+        // Lottery pool should be distributed
+        assertEq(etherium.currentLotteryPool(), 0);
+        assertTrue(etherium.dayLotteryExecuted(0));
     }
     
-    function testLotteryExecution() public {
+    function testLotteryWithMultipleHolders() public {
         // Setup: Multiple holders with different balances
         vm.prank(alice);
         etherium.mint{value: 2 ether}();
@@ -161,30 +166,26 @@ contract EtheriumTest is Test {
         uint256 lotteryPoolBefore = etherium.currentLotteryPool();
         assertTrue(lotteryPoolBefore > 0);
         
-        // Need at least one commit-reveal for randomness
-        uint256 secret = 42;
-        bytes32 commitment = keccak256(abi.encodePacked(secret, alice));
-        
-        vm.prank(alice);
-        etherium.commitSecret(commitment, 0.0001 ether); // 0.0001 ETHERIUM
-        
-        // Fast forward to day 1 to reveal for day 0
+        // Fast forward to day 1 to execute lottery for day 0
         vm.warp(block.timestamp + 24 hours + 1);
         
-        vm.prank(alice);
-        etherium.revealSecret(secret, 0);
+        // Trigger snapshot via mint (which calls _tryExecuteLottery internally)
+        address dave = address(0x4);
+        vm.deal(dave, 1 ether);
+        vm.prank(dave);
+        etherium.mint{value: 0.1 ether}(); // This will take the snapshot
         
-        // Fast forward to day 2 to execute lottery for day 0
-        vm.warp(block.timestamp + 24 hours + 1);
+        // Mine blocks to pass the gap
+        vm.roll(block.number + 11);
         
-        // Execute lottery
+        // Execute lottery with prevrandao
         etherium.executeLottery();
         
         // Lottery pool should be empty
         assertEq(etherium.currentLotteryPool(), 0);
         
         // One of the holders should have won
-        // Can't predict exact winner due to randomness, but total supply should increase
+        // Can't predict exact winner due to randomness, but total supply should match
         uint256 totalSupplyAfter = etherium.totalSupply();
         assertTrue(totalSupplyAfter > 0);
     }

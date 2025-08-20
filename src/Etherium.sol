@@ -7,11 +7,10 @@ import {IERC20} from "./interfaces/IExternalTokens.sol";
 
 /**
  * @title Etherium
- * @dev ERC20 token backed by ETH with daily lottery and commit-reveal randomness
+ * @dev ERC20 token backed by ETH with daily lottery using prevrandao
  * - 1 ETH = 1 ETHERIUM (18 decimals)
- * - 1% fee on mint/burn/transfer (0.9% to lottery pool, 0.1% to randomness participants)
- * - Daily lottery for random holder
- * - Overlapping commit-reveal phases: commit for day N, reveal for day N-1
+ * - 1% fee on mint/burn/transfer (100% to lottery pool)
+ * - Daily lottery for random holder using prevrandao
  * - Users can lock 100 PepeUSD during minting period to mint without fees
  * - Efficient winner selection using cumulative sum tree
  */
@@ -19,20 +18,14 @@ contract Etherium is ERC20, ReentrancyGuard {
     // Conversion: 1 ETH = 1 ETHERIUM (both 18 decimals)
     uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
-    uint256 public constant LOTTERY_FEE_PERCENT = 90; // 0.9% = 90 basis points
-    uint256 public constant RANDOMNESS_FEE_PERCENT = 10; // 0.1% = 10 basis points
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 7 days;
     uint256 public constant PEPEUSD_LOCK_AMOUNT = 100 ether; // 100 PepeUSD (18 decimals)
     uint256 public constant PEPEUSD_UNLOCK_TIME = 30 days; // 1 month from deployment
 
-    // Synthetic addresses for pools
+    // Synthetic address for lottery pool
     address public constant LOTTERY_POOL =
         0x000000000000107700000Add2E55000000000000;
-    address public constant RANDOMNESS_POOL =
-        0x000000000000d1ce00000AdD2e55000000000000;
-    address public constant STAKING_POOL =
-        0x000000000000BeEf00000aDd2E55000000000000;
 
     uint256 public immutable deploymentTime;
     uint256 public immutable mintingEndTime;
@@ -40,22 +33,10 @@ contract Etherium is ERC20, ReentrancyGuard {
 
     // Lottery state
     uint256 public lastLotteryTime;
-
-    // Commit-reveal state
-    struct CommitReveal {
-        bytes32 commitment;
-        uint256 amount;
-        uint256 revealedSecret;
-        bool revealed;
-        bool claimed;
-    }
-
-    mapping(uint256 day => mapping(address participant => CommitReveal))
-        public dayCommitments;
-    mapping(uint256 day => uint256 seed) public dayRandomSeed;
-    mapping(uint256 day => address[] participants) public dayParticipants;
-    mapping(uint256 day => uint256 totalRevealed) public dayTotalRevealed;
     mapping(uint256 day => bool executed) public dayLotteryExecuted;
+    mapping(uint256 day => uint256 snapshotBlock) public daySnapshotBlock;
+    mapping(uint256 day => uint256 seed) public dayRandomSeed;
+    uint256 public constant BLOCK_GAP = 10; // Number of blocks to wait after snapshot before using prevrandao
 
     // Struct to maintain rolling 2-day history for each value
     // Stores current and previous value with the day of last update
@@ -81,8 +62,6 @@ contract Etherium is ERC20, ReentrancyGuard {
     DualState public holderCount;
     DualState public totalHolderBalance;
 
-    // Used secrets tracking to prevent reuse
-    mapping(uint256 secret => bool used) public usedSecrets;
 
     // PepeUSD integration
     IERC20 public constant PEPEUSD =
@@ -104,22 +83,7 @@ contract Etherium is ERC20, ReentrancyGuard {
         uint256 fee
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
-    event CommitmentMade(
-        address indexed participant,
-        uint256 day,
-        bytes32 commitment,
-        uint256 amount
-    );
-    event SecretRevealed(
-        address indexed participant,
-        uint256 day,
-        uint256 secret
-    );
-    event RandomnessRewardClaimed(
-        address indexed participant,
-        uint256 day,
-        uint256 amount
-    );
+    event DaySnapshotTaken(uint256 indexed day, uint256 blockNumber);
     event PepeUSDLocked(
         address indexed user,
         uint256 pepeAmount,
@@ -176,14 +140,10 @@ contract Etherium is ERC20, ReentrancyGuard {
         // Mint full amount to user first
         _mint(msg.sender, msg.value);
 
-        // Then transfer fees from user to pools
+        // Then transfer fees to lottery pool
         if (fee > 0) {
-            uint256 lotteryFee = (fee * LOTTERY_FEE_PERCENT) / FEE_PERCENT;
-            uint256 randomnessFee = fee - lotteryFee;
-
-            // Use OpenZeppelin's internal _update to move fees to pools
-            super._update(msg.sender, LOTTERY_POOL, lotteryFee);
-            super._update(msg.sender, RANDOMNESS_POOL, randomnessFee);
+            // Use OpenZeppelin's internal _update to move fees to pool
+            super._update(msg.sender, LOTTERY_POOL, fee);
         }
 
         _updateCumulativeBalances(msg.sender, int256(netEtherium));
@@ -282,13 +242,9 @@ contract Etherium is ERC20, ReentrancyGuard {
         uint256 fee = (amount * FEE_PERCENT) / BASIS_POINTS;
         uint256 netEtherium = amount - fee;
 
-        // First transfer fees from user to pools
+        // First transfer fees to lottery pool
         if (fee > 0) {
-            uint256 lotteryFee = (fee * LOTTERY_FEE_PERCENT) / FEE_PERCENT;
-            uint256 randomnessFee = fee - lotteryFee;
-
-            super._update(msg.sender, LOTTERY_POOL, lotteryFee);
-            super._update(msg.sender, RANDOMNESS_POOL, randomnessFee);
+            super._update(msg.sender, LOTTERY_POOL, fee);
         }
 
         // Then burn the remainder from user
@@ -317,8 +273,6 @@ contract Etherium is ERC20, ReentrancyGuard {
             return;
         }
 
-        // Prevent normal transfers to staking pool
-        require(to != STAKING_POOL, "Cannot transfer to staking pool");
 
         // Try to execute pending lottery before transfers
         _tryExecuteLottery();
@@ -334,13 +288,9 @@ contract Etherium is ERC20, ReentrancyGuard {
         // Transfer net amount to recipient
         super._update(from, to, netAmount);
 
-        // Transfer fees to pools
+        // Transfer fees to lottery pool
         if (fee > 0) {
-            uint256 lotteryFee = (fee * LOTTERY_FEE_PERCENT) / FEE_PERCENT;
-            uint256 randomnessFee = fee - lotteryFee;
-
-            super._update(from, LOTTERY_POOL, lotteryFee);
-            super._update(from, RANDOMNESS_POOL, randomnessFee);
+            super._update(from, LOTTERY_POOL, fee);
         }
     }
 
@@ -455,11 +405,7 @@ contract Etherium is ERC20, ReentrancyGuard {
         int256 balanceChange
     ) internal {
         if (account.code.length > 0) return; // Skip contracts
-        if (
-            account == LOTTERY_POOL ||
-            account == RANDOMNESS_POOL ||
-            account == STAKING_POOL
-        ) return; // Skip synthetic addresses
+        if (account == LOTTERY_POOL) return; // Skip synthetic address
 
         uint32 currentDay = uint32(getCurrentDay());
         uint256 currentBalance = balanceOf(account);
@@ -567,88 +513,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         }
     }
 
-    /**
-     * @dev Commit phase for randomness (can commit for the current day)
-     */
-    function commitSecret(
-        bytes32 commitment,
-        uint256 etheriumAmount
-    ) external nonReentrant {
-        // Try to execute pending lottery before changing state
-        _tryExecuteLottery();
-
-        uint256 currentDayNumber = getCurrentDay();
-        // Can always commit for the current day
-        require(etheriumAmount > 0, "Must stake ETHERIUM");
-        require(
-            dayCommitments[currentDayNumber][msg.sender].commitment == 0,
-            "Already committed"
-        );
-        require(
-            balanceOf(msg.sender) >= etheriumAmount,
-            "Insufficient ETHERIUM balance"
-        );
-
-        // Transfer the staked ETHERIUM to staking pool (maintains 1:1 ETH ratio)
-        super._update(msg.sender, STAKING_POOL, etheriumAmount);
-        _updateCumulativeBalances(msg.sender, -int256(etheriumAmount));
-
-        dayCommitments[currentDayNumber][msg.sender] = CommitReveal({
-            commitment: commitment,
-            amount: etheriumAmount,
-            revealedSecret: 0,
-            revealed: false,
-            claimed: false
-        });
-
-        dayParticipants[currentDayNumber].push(msg.sender);
-
-        emit CommitmentMade(
-            msg.sender,
-            currentDayNumber,
-            commitment,
-            etheriumAmount
-        );
-    }
-
-    /**
-     * @dev Reveal phase for randomness (can reveal for the previous day)
-     */
-    function revealSecret(
-        uint256 secret,
-        uint256 dayNumber
-    ) external nonReentrant {
-        uint256 currentDayNumber = getCurrentDay();
-        require(
-            dayNumber == currentDayNumber - 1,
-            "Can only reveal for previous day"
-        );
-        require(currentDayNumber > 0, "Cannot reveal on first day");
-
-        CommitReveal storage cr = dayCommitments[dayNumber][msg.sender];
-        require(cr.commitment != 0, "No commitment found");
-        require(!cr.revealed, "Already revealed");
-        require(
-            keccak256(abi.encodePacked(secret, msg.sender)) == cr.commitment,
-            "Invalid secret"
-        );
-        require(!usedSecrets[secret], "Secret already used");
-
-        cr.revealedSecret = secret;
-        cr.revealed = true;
-        usedSecrets[secret] = true;
-        dayTotalRevealed[dayNumber] += cr.amount;
-
-        // Initialize seed with prevrandao on first reveal to prevent single-participant manipulation
-        if (dayRandomSeed[dayNumber] == 0) {
-            dayRandomSeed[dayNumber] = block.prevrandao;
-        }
-        
-        // Incrementally update the random seed using hash to prevent manipulation
-        dayRandomSeed[dayNumber] = uint256(keccak256(abi.encodePacked(dayRandomSeed[dayNumber], secret)));
-
-        emit SecretRevealed(msg.sender, dayNumber, secret);
-    }
 
     /**
      * @dev Internal function to try executing pending lotteries
@@ -656,16 +520,25 @@ contract Etherium is ERC20, ReentrancyGuard {
      */
     function _tryExecuteLottery() internal {
         uint256 currentDayNumber = getCurrentDay();
-
-        // Check if we can execute any lottery (day 2 onwards)
-        if (currentDayNumber < 2) return;
-
-        uint256 lotteryDay = currentDayNumber - 2;
-
-        // Skip if already executed or window expired
+        
+        // Check if we can execute any lottery (day 1 onwards)
+        if (currentDayNumber < 1) return;
+        
+        uint256 lotteryDay = currentDayNumber - 1;
+        
+        // Skip if already executed
         if (dayLotteryExecuted[lotteryDay]) return;
-        if (currentDayNumber > lotteryDay + 3) return; // Window expired
-
+        
+        // Take snapshot if not taken yet
+        if (daySnapshotBlock[lotteryDay] == 0) {
+            daySnapshotBlock[lotteryDay] = block.number;
+            emit DaySnapshotTaken(lotteryDay, block.number);
+            return; // Wait for block gap before executing
+        }
+        
+        // Check if enough blocks have passed since snapshot
+        if (block.number < daySnapshotBlock[lotteryDay] + BLOCK_GAP) return;
+        
         _executeLotteryInternal(lotteryDay);
     }
 
@@ -673,12 +546,14 @@ contract Etherium is ERC20, ReentrancyGuard {
      * @dev Internal lottery execution logic
      */
     function _executeLotteryInternal(uint256 lotteryDay) internal {
-        // Get the random seed that was computed incrementally during reveals
-        uint256 randomSeed = dayRandomSeed[lotteryDay];
+        // Use prevrandao as the source of randomness
+        // We wait BLOCK_GAP blocks after snapshot to make manipulation harder
+        uint256 randomSeed = block.prevrandao;
+        dayRandomSeed[lotteryDay] = randomSeed;
+        
         uint32 lotteryDayUint32 = uint32(lotteryDay);
 
         // Get holder count and total balance from the lottery day's snapshot
-        // We use the historical values from when commits were happening
         uint112 snapshotHolderCount = _getDualStateValue(
             holderCount,
             lotteryDayUint32
@@ -717,14 +592,23 @@ contract Etherium is ERC20, ReentrancyGuard {
     function executeLottery() external nonReentrant {
         uint256 currentDayNumber = getCurrentDay();
         require(
-            currentDayNumber >= 2,
-            "Must wait until day 2 to execute first lottery"
+            currentDayNumber >= 1,
+            "Must wait until day 1 to execute first lottery"
         );
-        uint256 lotteryDay = currentDayNumber - 2;
+        uint256 lotteryDay = currentDayNumber - 1;
         require(!dayLotteryExecuted[lotteryDay], "Lottery already executed");
+        
+        // Take snapshot if not taken yet
+        if (daySnapshotBlock[lotteryDay] == 0) {
+            daySnapshotBlock[lotteryDay] = block.number;
+            emit DaySnapshotTaken(lotteryDay, block.number);
+            revert("Snapshot taken, wait for block gap before executing");
+        }
+        
+        // Ensure enough blocks have passed since snapshot
         require(
-            currentDayNumber <= lotteryDay + 3,
-            "Lottery execution window expired - snapshot may be corrupted"
+            block.number >= daySnapshotBlock[lotteryDay] + BLOCK_GAP,
+            "Must wait for block gap after snapshot"
         );
 
         _executeLotteryInternal(lotteryDay);
@@ -764,66 +648,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         return _getDualAddressValue(holderByIndex[left], lotteryDay);
     }
 
-    /**
-     * @dev Claim randomness rewards for honest participants
-     */
-    function claimRandomnessReward(uint256 day) external nonReentrant {
-        // Try to execute pending lottery before changing state
-        _tryExecuteLottery();
-
-        require(dayLotteryExecuted[day], "Lottery not executed yet");
-
-        CommitReveal storage cr = dayCommitments[day][msg.sender];
-        require(cr.revealed, "Did not reveal secret");
-        require(!cr.claimed, "Already claimed");
-
-        // Calculate reward share
-        uint256 randomnessPoolBalance = balanceOf(RANDOMNESS_POOL);
-
-        // Calculate forfeited stakes from non-revealers (still in staking pool)
-        address[] memory participants = dayParticipants[day];
-        uint256 forfeitedAmount = 0;
-        for (uint256 i = 0; i < participants.length; i++) {
-            CommitReveal memory participantCR = dayCommitments[day][
-                participants[i]
-            ];
-            if (!participantCR.revealed) {
-                forfeitedAmount += participantCR.amount;
-            }
-        }
-
-        // Total reward includes randomness pool and forfeited stakes
-        uint256 totalReward = randomnessPoolBalance + forfeitedAmount;
-        uint256 userReward = (totalReward * cr.amount) / dayTotalRevealed[day];
-
-        cr.claimed = true;
-
-        // Calculate proportional shares
-        uint256 poolShare = (randomnessPoolBalance * cr.amount) /
-            dayTotalRevealed[day];
-        uint256 forfeitedShare = (forfeitedAmount * cr.amount) /
-            dayTotalRevealed[day];
-
-        // Burn user's share from randomness pool
-        _burn(RANDOMNESS_POOL, poolShare);
-
-        // Transfer staked amount back from staking pool
-        super._update(STAKING_POOL, msg.sender, cr.amount);
-
-        // Transfer forfeited share from staking pool to user
-        if (forfeitedShare > 0) {
-            super._update(STAKING_POOL, msg.sender, forfeitedShare);
-        }
-
-        // Mint the randomness pool reward portion
-        _mint(msg.sender, poolShare);
-
-        // Total amount returned to user (original stake + rewards)
-        uint256 totalPayout = cr.amount + userReward;
-        _updateCumulativeBalances(msg.sender, int256(totalPayout));
-
-        emit RandomnessRewardClaimed(msg.sender, day, userReward);
-    }
 
     /**
      * @dev Get current day number
@@ -832,21 +656,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         return (block.timestamp - deploymentTime) / 24 hours;
     }
 
-    /**
-     * @dev Check if can commit for a specific day
-     */
-    function canCommitForDay(uint256 dayNumber) public view returns (bool) {
-        uint256 currentDayNumber = getCurrentDay();
-        return dayNumber == currentDayNumber;
-    }
-
-    /**
-     * @dev Check if can reveal for a specific day
-     */
-    function canRevealForDay(uint256 dayNumber) public view returns (bool) {
-        uint256 currentDayNumber = getCurrentDay();
-        return currentDayNumber > 0 && dayNumber == currentDayNumber - 1;
-    }
 
     /**
      * @dev Get holder count (latest value)
@@ -876,12 +685,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         return balanceOf(LOTTERY_POOL);
     }
 
-    /**
-     * @dev Get current randomness pool balance
-     */
-    function currentRandomnessPool() external view returns (uint256) {
-        return balanceOf(RANDOMNESS_POOL);
-    }
 
     /**
      * @dev Check if an address is a holder
