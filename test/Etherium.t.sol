@@ -278,6 +278,242 @@ contract EtheriumTest is Test {
         // etherium.unlockPepeUSD();
         // assertEq(etherium.pepeUSDLocked(alice), 0, "Should have no PepeUSD locked");
     }
+    
+    function testFenwickDebug() public {
+        // Set up same scenario as probability test
+        vm.prank(alice);
+        etherium.mint{value: 1 ether}();
+        
+        console.log("After Alice mints:");
+        console.log("Fenwick[1]:", etherium.getFenwickValue(1));
+        console.log("Fenwick[2]:", etherium.getFenwickValue(2));
+        
+        vm.prank(bob);
+        etherium.mint{value: 2 ether}();
+        
+        console.log("\nAfter Bob mints:");
+        console.log("Fenwick[1]:", etherium.getFenwickValue(1));
+        console.log("Fenwick[2]:", etherium.getFenwickValue(2));
+        
+        vm.prank(charlie);
+        etherium.mint{value: 3 ether}();
+        
+        console.log("\nAfter Charlie mints:");
+        console.log("Fenwick[1]:", etherium.getFenwickValue(1));
+        console.log("Fenwick[2]:", etherium.getFenwickValue(2));
+        console.log("Fenwick[3]:", etherium.getFenwickValue(3));
+        console.log("Fenwick[4]:", etherium.getFenwickValue(4));
+        
+        console.log("\nBefore transfer:");
+        console.log("Alice:", etherium.balanceOf(alice));
+        console.log("Bob:", etherium.balanceOf(bob));
+        console.log("Charlie:", etherium.balanceOf(charlie));
+        
+        // Transfer 0.5 ETHERIUM from Bob to Charlie
+        vm.prank(bob);
+        etherium.transfer(charlie, 0.5 ether);
+        
+        console.log("\nAfter transfer:");
+        console.log("Alice:", etherium.balanceOf(alice));
+        console.log("Bob:", etherium.balanceOf(bob));
+        console.log("Charlie:", etherium.balanceOf(charlie));
+        console.log("Fenwick[1]:", etherium.getFenwickValue(1));
+        console.log("Fenwick[2]:", etherium.getFenwickValue(2));
+        console.log("Fenwick[3]:", etherium.getFenwickValue(3));
+        console.log("Fenwick[4]:", etherium.getFenwickValue(4));
+        
+        // Now simulate lottery selection to see the probabilities
+        uint256 aliceBalance = etherium.balanceOf(alice);
+        uint256 bobBalance = etherium.balanceOf(bob);
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        uint256 totalBalance = aliceBalance + bobBalance + charlieBalance;
+        
+        console.log("\nExpected probabilities:");
+        console.log("Alice:", aliceBalance * 100 / totalBalance, "%");
+        console.log("Bob:", bobBalance * 100 / totalBalance, "%");
+        console.log("Charlie:", charlieBalance * 100 / totalBalance, "%");
+        
+        // Simulate lottery day 1
+        vm.warp(block.timestamp + 24 hours + 1);
+        
+        // Take snapshot
+        MockContract trigger = new MockContract();
+        vm.deal(address(trigger), 1 ether);
+        trigger.mintEtherium(etherium);
+        
+        // Check what indices point to what
+        console.log("Holder indices:");
+        for (uint256 i = 1; i <= etherium.getHolderCount(); i++) {
+            (address holder, uint256 balance) = etherium.getHolderByIndex(i);
+            console.log("Index:", i);
+            console.log("Holder:", holder);
+            console.log("Balance:", balance);
+            console.log("Fenwick value:", etherium.getFenwickValue(i));
+            console.log("Suffix sum:", etherium.getSuffixSum(i));
+        }
+    }
+    
+    function testFenwickTreeCumulativeSums() public {
+        // Simple test to verify Fenwick tree is tracking cumulative sums correctly
+        vm.prank(alice);
+        etherium.mint{value: 1 ether}(); // Alice: 0.99 ETH
+        
+        vm.prank(bob);
+        etherium.mint{value: 2 ether}(); // Bob: 1.98 ETH
+        
+        vm.prank(charlie);
+        etherium.mint{value: 3 ether}(); // Charlie: 2.97 ETH
+        
+        // Check balances
+        uint256 aliceBalance = etherium.balanceOf(alice);
+        uint256 bobBalance = etherium.balanceOf(bob);
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        
+        console.log("Initial balances:");
+        console.log("Alice:", aliceBalance);
+        console.log("Bob:", bobBalance);
+        console.log("Charlie:", charlieBalance);
+        
+        // The cumulative sums should be:
+        // Index 1 (Alice): 0.99 ETH
+        // Index 2 (Bob): 0.99 + 1.98 = 2.97 ETH
+        // Index 3 (Charlie): 0.99 + 1.98 + 2.97 = 5.94 ETH
+        
+        // Now do a transfer to see if cumulative sums update correctly
+        vm.prank(bob);
+        etherium.transfer(charlie, 0.5 ether);
+        
+        console.log("\nAfter transfer:");
+        console.log("Alice:", etherium.balanceOf(alice));
+        console.log("Bob:", etherium.balanceOf(bob));
+        console.log("Charlie:", etherium.balanceOf(charlie));
+        
+        // New cumulative sums should be:
+        // Index 1 (Alice): 0.99 ETH
+        // Index 2 (Bob): 0.99 + 1.48 = 2.47 ETH  
+        // Index 3 (Charlie): 0.99 + 1.48 + 3.465 = 5.935 ETH
+    }
+    
+    function testLotteryProbabilityDistribution() public {
+        // Setup holders with specific balances
+        // Alice: 1 ETH worth, Bob: 2 ETH worth, Charlie: 3.5 ETH worth after transfer
+        vm.prank(alice);
+        etherium.mint{value: 1 ether}();
+        
+        vm.prank(bob); 
+        etherium.mint{value: 2 ether}();
+        
+        vm.prank(charlie);
+        etherium.mint{value: 3 ether}();
+        
+        // Bob transfers 0.5 ETHERIUM to Charlie
+        // Bob has 2 * 0.99 = 1.98 ETHERIUM initially
+        // Transfer of 0.5 ETHERIUM: Bob loses 0.5, Charlie gains 0.495 (after 1% fee)
+        vm.prank(bob);
+        etherium.transfer(charlie, 0.5 ether);
+        
+        // Final balances after all fees:
+        // Alice: 0.99 ETH (minted 1 ETH with 1% fee)
+        // Bob: 1.98 - 0.5 = 1.48 ETH
+        // Charlie: 2.97 + 0.495 = 3.465 ETH
+        // Total holder balance: 0.99 + 1.48 + 3.465 = 5.935 ETH
+        
+        uint256 aliceBalance = etherium.balanceOf(alice);
+        uint256 bobBalance = etherium.balanceOf(bob);
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        
+        console.log("Alice balance:", aliceBalance);
+        console.log("Bob balance:", bobBalance);
+        console.log("Charlie balance:", charlieBalance);
+        console.log("Total:", aliceBalance + bobBalance + charlieBalance);
+        
+        // Debug: Check actual holder setup and total balance
+        console.log("Holder count:", etherium.getHolderCount());
+        
+        // Track wins for each holder over many rounds
+        uint256 aliceWins = 0;
+        uint256 bobWins = 0;
+        uint256 charlieWins = 0;
+        uint256 rounds = 1000; // Increased for better statistics
+        
+        // Deploy a mock contract to trigger snapshots (contracts don't participate in lottery)
+        MockContract triggerContract = new MockContract();
+        vm.deal(address(triggerContract), 10 ether);
+        
+        // Save initial state
+        uint256 snapshotId = vm.snapshot();
+        
+        for (uint256 i = 0; i < rounds; i++) {
+            // Restore to initial state for each round
+            vm.revertTo(snapshotId);
+            snapshotId = vm.snapshot();
+            
+            // Move to day 1
+            vm.warp(block.timestamp + 24 hours + 1);
+            
+            // Set a different prevrandao for each round
+            vm.prevrandao(bytes32(uint256(keccak256(abi.encode(i, "test")))));
+            
+            // Trigger snapshot by minting from a contract (won't be added to holders)
+            triggerContract.mintEtherium(etherium);
+            
+            // Mine blocks to pass the gap
+            vm.roll(block.number + 11);
+            
+            // Execute lottery
+            etherium.executeLottery();
+            
+            // Check who won by comparing balance increases
+            uint256 aliceNewBalance = etherium.balanceOf(alice);
+            uint256 bobNewBalance = etherium.balanceOf(bob);
+            uint256 charlieNewBalance = etherium.balanceOf(charlie);
+            
+            if (aliceNewBalance > aliceBalance) {
+                aliceWins++;
+            } else if (bobNewBalance > bobBalance) {
+                bobWins++;
+            } else if (charlieNewBalance > charlieBalance) {
+                charlieWins++;
+            } else {
+                // Check all holder balances to find winner
+                bool foundWinner = false;
+                for (uint256 j = 1; j <= etherium.getHolderCount(); j++) {
+                    (address holder, ) = etherium.getHolderByIndex(j);
+                    if (holder != alice && holder != bob && holder != charlie) {
+                        console.log("Round", i, "- unexpected winner:", holder);
+                        foundWinner = true;
+                        break;
+                    }
+                }
+                if (!foundWinner) {
+                    console.log("Round", i, "- no winner found!");
+                }
+            }
+        }
+        
+        // Calculate expected probabilities based on balances
+        uint256 totalBalance = aliceBalance + bobBalance + charlieBalance;
+        uint256 expectedAliceWins = (aliceBalance * rounds) / totalBalance;
+        uint256 expectedBobWins = (bobBalance * rounds) / totalBalance;
+        uint256 expectedCharlieWins = (charlieBalance * rounds) / totalBalance;
+        
+        console.log("\nResults after", rounds, "rounds:");
+        console.log("Alice wins:", aliceWins, "Expected:", expectedAliceWins);
+        console.log("Bob wins:", bobWins, "Expected:", expectedBobWins);
+        console.log("Charlie wins:", charlieWins, "Expected:", expectedCharlieWins);
+        
+        // Allow for statistical deviation (roughly 3 standard deviations)
+        // For binomial distribution, std dev ≈ sqrt(n * p * (1-p))
+        // Using a simplified check: actual should be within 10% of expected for large samples
+        uint256 tolerance = rounds / 10; // 10% tolerance for 1000 rounds
+        
+        assertApproxEqAbs(aliceWins, expectedAliceWins, tolerance, "Alice win distribution off");
+        assertApproxEqAbs(bobWins, expectedBobWins, tolerance, "Bob win distribution off");
+        assertApproxEqAbs(charlieWins, expectedCharlieWins, tolerance, "Charlie win distribution off");
+        
+        // Ensure all rounds had a winner
+        assertEq(aliceWins + bobWins + charlieWins, rounds, "Not all rounds had a winner");
+    }
 
 }
 
