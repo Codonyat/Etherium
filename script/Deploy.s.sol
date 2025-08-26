@@ -9,15 +9,15 @@ contract DeployScript is Script {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
+
         vm.startBroadcast(deployerPrivateKey);
-        
+
         Etherium etherium = new Etherium();
-        
+
         console.log("Etherium deployed at:", address(etherium));
         console.log("Deployment time:", block.timestamp);
         console.log("Minting end time:", block.timestamp + 7 days);
-        
+
         vm.stopBroadcast();
     }
 }

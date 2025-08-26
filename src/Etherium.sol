@@ -25,8 +25,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     uint256 public constant PEPEUSD_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic address for lottery pool
-    address public constant LOTTERY_POOL =
-        0x000000000000107700000Add2E55000000000000;
+    address public constant LOTTERY_POOL = 0x000000000000107700000Add2E55000000000000;
 
     uint256 public immutable deploymentTime;
     uint256 public immutable mintingEndTime;
@@ -44,6 +43,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         address winner; // 160 bits
         uint96 amount; // 96 bits (max ~79 million ETH)
     }
+
     UnclaimedPrize[7] public unclaimedPrizes;
 
     // Public goods recipients (hardcoded)
@@ -62,7 +62,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint96 olderValue; // Previous value before last update (96 bits)
         uint96 latestValue; // Most recent value (96 bits)
         uint32 lastUpdatedDay; // Day when latestValue was set (32 bits)
-        // Total: 224 bits (fits in 1 storage slot)
+            // Total: 224 bits (fits in 1 storage slot)
     }
 
     // For addresses, we need a separate struct since addresses are 160 bits
@@ -80,37 +80,17 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     DualState public totalHolderBalance;
 
     // PepeUSD integration
-    IERC20 public constant PEPEUSD =
-        IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
+    IERC20 public constant PEPEUSD = IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
 
     // Track PepeUSD locked per user during minting period
     mapping(address user => uint256 amount) public pepeUSDLocked;
 
-    event Minted(
-        address indexed to,
-        uint256 ethAmount,
-        uint256 etheriumAmount,
-        uint256 fee
-    );
-    event Redeemed(
-        address indexed from,
-        uint256 etheriumAmount,
-        uint256 ethAmount,
-        uint256 fee
-    );
+    event Minted(address indexed to, uint256 ethAmount, uint256 etheriumAmount, uint256 fee);
+    event Redeemed(address indexed from, uint256 etheriumAmount, uint256 ethAmount, uint256 fee);
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event PrizeClaimed(address indexed winner, uint256 amount);
-    event PublicGoodsFunded(
-        address indexed publicGood,
-        uint256 amount,
-        address previousWinner
-    );
-    event PepeUSDLocked(
-        address indexed user,
-        uint256 pepeAmount,
-        uint256 etheriumMinted,
-        uint256 unlockTime
-    );
+    event PublicGoodsFunded(address indexed publicGood, uint256 amount, address previousWinner);
+    event PepeUSDLocked(address indexed user, uint256 pepeAmount, uint256 etheriumMinted, uint256 unlockTime);
     event PepeUSDUnlocked(address indexed user, uint256 amount);
 
     constructor() ERC20("Etherium", "ETHERIUM") {
@@ -166,10 +146,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             }
         } else {
             // After minting period: enforce max supply and transfer fees
-            require(
-                totalSupply() + msg.value <= maxSupplyEver,
-                "Max supply reached"
-            );
+            require(totalSupply() + msg.value <= maxSupplyEver, "Max supply reached");
             // Mint full amount to user, then transfer fees
             _mint(msg.sender, msg.value);
             if (fee > 0) {
@@ -180,11 +157,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Get balance after minting and fee transfer
         uint256 balanceAfter = balanceOf(msg.sender);
 
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        _updateCumulativeBalancesWithExplicitBalances(msg.sender, balanceBefore, balanceAfter);
 
         emit Minted(msg.sender, msg.value, netEtherium, fee);
     }
@@ -194,23 +167,13 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      */
     function mintFeeFree() external payable nonReentrant {
         require(msg.value > 0, "Must send ETH");
-        require(
-            block.timestamp <= mintingEndTime,
-            "Fee-free minting only during minting period"
-        );
+        require(block.timestamp <= mintingEndTime, "Fee-free minting only during minting period");
 
         // Try to execute pending lottery before changing state
         _tryExecuteLottery();
 
         // Transfer 100 PepeUSD from user to lock
-        require(
-            PEPEUSD.transferFrom(
-                msg.sender,
-                address(this),
-                PEPEUSD_LOCK_AMOUNT
-            ),
-            "PepeUSD transfer failed"
-        );
+        require(PEPEUSD.transferFrom(msg.sender, address(this), PEPEUSD_LOCK_AMOUNT), "PepeUSD transfer failed");
 
         // Track locked amount
         pepeUSDLocked[msg.sender] += PEPEUSD_LOCK_AMOUNT;
@@ -222,10 +185,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // After minting period: enforce max supply limit
         if (block.timestamp > mintingEndTime) {
-            require(
-                totalSupply() + netEtherium <= maxSupplyEver,
-                "Max supply reached"
-            );
+            require(totalSupply() + netEtherium <= maxSupplyEver, "Max supply reached");
         }
 
         // Get balance before minting
@@ -237,18 +197,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Get balance after minting
         uint256 balanceAfter = balanceOf(msg.sender);
 
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        _updateCumulativeBalancesWithExplicitBalances(msg.sender, balanceBefore, balanceAfter);
 
-        emit PepeUSDLocked(
-            msg.sender,
-            PEPEUSD_LOCK_AMOUNT,
-            netEtherium,
-            deploymentTime + PEPEUSD_UNLOCK_TIME
-        );
+        emit PepeUSDLocked(msg.sender, PEPEUSD_LOCK_AMOUNT, netEtherium, deploymentTime + PEPEUSD_UNLOCK_TIME);
 
         emit Minted(msg.sender, msg.value, netEtherium, 0);
     }
@@ -260,8 +211,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 lockedAmount = pepeUSDLocked[msg.sender];
         require(lockedAmount > 0, "No locked PepeUSD");
         require(
-            block.timestamp >= deploymentTime + PEPEUSD_UNLOCK_TIME,
-            "Still in lock period (1 month from deployment)"
+            block.timestamp >= deploymentTime + PEPEUSD_UNLOCK_TIME, "Still in lock period (1 month from deployment)"
         );
 
         // Try to execute pending lottery before changing state
@@ -271,10 +221,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         pepeUSDLocked[msg.sender] = 0;
 
         // Return all locked PepeUSD
-        require(
-            PEPEUSD.transfer(msg.sender, lockedAmount),
-            "PepeUSD transfer failed"
-        );
+        require(PEPEUSD.transfer(msg.sender, lockedAmount), "PepeUSD transfer failed");
 
         emit PepeUSDUnlocked(msg.sender, lockedAmount);
     }
@@ -308,14 +255,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Get balance after burning
         uint256 balanceAfter = balanceOf(msg.sender);
 
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        _updateCumulativeBalancesWithExplicitBalances(msg.sender, balanceBefore, balanceAfter);
 
         // Transfer ETH back to user (1:1 conversion)
-        (bool success, ) = msg.sender.call{value: netEtherium}("");
+        (bool success,) = msg.sender.call{value: netEtherium}("");
         require(success, "ETH transfer failed");
 
         emit Redeemed(msg.sender, amount, netEtherium, fee);
@@ -324,11 +267,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Override update to apply fees on transfers
      */
-    function _update(
-        address from,
-        address to,
-        uint256 value
-    ) internal override {
+    function _update(address from, address to, uint256 value) internal override {
         // Redirect external transfers to this contract to LOTTERY_POOL
         if (to == address(this)) {
             super._update(from, LOTTERY_POOL, value);
@@ -365,26 +304,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 toBalanceAfter = balanceOf(to);
 
         // Update holder tracking with actual balance changes
-        _updateCumulativeBalancesWithExplicitBalances(
-            from,
-            fromBalanceBefore,
-            fromBalanceAfter
-        );
-        _updateCumulativeBalancesWithExplicitBalances(
-            to,
-            toBalanceBefore,
-            toBalanceAfter
-        );
+        _updateCumulativeBalancesWithExplicitBalances(from, fromBalanceBefore, fromBalanceAfter);
+        _updateCumulativeBalancesWithExplicitBalances(to, toBalanceBefore, toBalanceAfter);
     }
 
     /**
      * @dev Update a DualState with a new value, preserving history
      */
-    function _updateDualState(
-        DualState storage state,
-        uint96 newValue,
-        uint32 currentDay
-    ) internal {
+    function _updateDualState(DualState storage state, uint96 newValue, uint32 currentDay) internal {
         if (state.lastUpdatedDay < currentDay) {
             // New day - shift current to older and set new value
             state.olderValue = state.latestValue;
@@ -399,11 +326,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Update a DualAddress with a new value, preserving history
      */
-    function _updateDualAddress(
-        DualAddress storage state,
-        address newValue,
-        uint32 currentDay
-    ) internal {
+    function _updateDualAddress(DualAddress storage state, address newValue, uint32 currentDay) internal {
         if (state.lastUpdatedDay < currentDay) {
             // New day - shift current to older and set new value
             state.olderValue = state.latestValue;
@@ -418,10 +341,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Get value from a DualState for a specific day
      */
-    function _getDualStateValue(
-        DualState memory state,
-        uint32 targetDay
-    ) internal pure returns (uint96) {
+    function _getDualStateValue(DualState memory state, uint32 targetDay) internal pure returns (uint96) {
         if (state.lastUpdatedDay <= targetDay) {
             return state.latestValue;
         }
@@ -431,10 +351,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Get value from a DualAddress for a specific day
      */
-    function _getDualAddressValue(
-        DualAddress memory state,
-        uint32 targetDay
-    ) internal pure returns (address) {
+    function _getDualAddressValue(DualAddress memory state, uint32 targetDay) internal pure returns (address) {
         if (state.lastUpdatedDay <= targetDay) {
             return state.latestValue;
         }
@@ -475,10 +392,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * @dev Query suffix sum from index to end for a specific day
      * Goes upward using the current holder count as max
      */
-    function _fenwickQuery(
-        uint256 index,
-        uint32 targetDay
-    ) internal view returns (uint256) {
+    function _fenwickQuery(uint256 index, uint32 targetDay) internal view returns (uint256) {
         uint256 sum = 0;
         uint96 maxIndex = _getDualStateValue(holderCount, targetDay);
 
@@ -492,11 +406,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Update holder balance with explicit before/after balances
      */
-    function _updateCumulativeBalancesWithExplicitBalances(
-        address account,
-        uint256 balanceBefore,
-        uint256 balanceAfter
-    ) internal {
+    function _updateCumulativeBalancesWithExplicitBalances(address account, uint256 balanceBefore, uint256 balanceAfter)
+        internal
+    {
         if (account.code.length > 0) return; // Skip contracts
         if (account == LOTTERY_POOL) return; // Skip synthetic address
 
@@ -508,16 +420,11 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         if (balanceAfter > 0 && currentIndex == 0) {
             // Add new holder
             uint96 newCount = holderCount.latestValue + 1;
-            uint96 newTotalBalance = totalHolderBalance.latestValue +
-                uint96(balanceAfter);
+            uint96 newTotalBalance = totalHolderBalance.latestValue + uint96(balanceAfter);
 
             _updateDualState(holderCount, newCount, currentDay);
             _updateDualAddress(holderByIndex[newCount], account, currentDay);
-            _updateDualState(
-                indexByHolder[account],
-                uint96(newCount),
-                currentDay
-            );
+            _updateDualState(indexByHolder[account], uint96(newCount), currentDay);
 
             // Update Fenwick tree
             _fenwickUpdate(newCount, int256(balanceAfter));
@@ -530,8 +437,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             // Update Fenwick tree before removal
             _fenwickUpdate(currentIndex, -int256(balanceBefore));
 
-            uint96 newTotalBalance = currentTotalBalance -
-                uint96(balanceBefore);
+            uint96 newTotalBalance = currentTotalBalance - uint96(balanceBefore);
 
             _updateDualState(totalHolderBalance, newTotalBalance, currentDay);
 
@@ -543,41 +449,22 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
                 // Get the last holder's balance from the Fenwick tree at their position
                 // This is their balance BEFORE any concurrent updates
-                uint96 lastHolderFenwickBalance = fenwickTree[currentCount]
-                    .latestValue;
+                uint96 lastHolderFenwickBalance = fenwickTree[currentCount].latestValue;
 
                 // Remove last holder's balance from old position
-                _fenwickUpdate(
-                    currentCount,
-                    -int256(uint256(lastHolderFenwickBalance))
-                );
+                _fenwickUpdate(currentCount, -int256(uint256(lastHolderFenwickBalance)));
 
                 // Move last holder to current position
-                _updateDualAddress(
-                    holderByIndex[currentIndex],
-                    lastHolder,
-                    currentDay
-                );
-                _updateDualState(
-                    indexByHolder[lastHolder],
-                    uint96(currentIndex),
-                    currentDay
-                );
+                _updateDualAddress(holderByIndex[currentIndex], lastHolder, currentDay);
+                _updateDualState(indexByHolder[lastHolder], uint96(currentIndex), currentDay);
 
                 // Add last holder's balance to new position
-                _fenwickUpdate(
-                    currentIndex,
-                    int256(uint256(lastHolderFenwickBalance))
-                );
+                _fenwickUpdate(currentIndex, int256(uint256(lastHolderFenwickBalance)));
             }
 
             // Clear the removed holder's index and last position
             _updateDualState(indexByHolder[account], 0, currentDay);
-            _updateDualAddress(
-                holderByIndex[currentCount],
-                address(0),
-                currentDay
-            );
+            _updateDualAddress(holderByIndex[currentCount], address(0), currentDay);
 
             // Decrement holder count
             _updateDualState(holderCount, currentCount - 1, currentDay);
@@ -590,14 +477,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             uint96 newTotalBalance;
 
             if (balanceChange > 0) {
-                newTotalBalance =
-                    currentTotalBalance +
-                    uint96(uint256(balanceChange));
+                newTotalBalance = currentTotalBalance + uint96(uint256(balanceChange));
             } else {
                 uint96 decrease = uint96(uint256(-balanceChange));
-                newTotalBalance = currentTotalBalance > decrease
-                    ? currentTotalBalance - decrease
-                    : 0;
+                newTotalBalance = currentTotalBalance > decrease ? currentTotalBalance - decrease : 0;
             }
 
             _updateDualState(totalHolderBalance, newTotalBalance, currentDay);
@@ -639,22 +522,12 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint32 snapshotDay = uint32(lastLotteryDay);
 
         // Get holder count and total balance from the snapshot day
-        uint96 snapshotHolderCount = _getDualStateValue(
-            holderCount,
-            snapshotDay
-        );
-        uint96 snapshotTotalBalance = _getDualStateValue(
-            totalHolderBalance,
-            snapshotDay
-        );
+        uint96 snapshotHolderCount = _getDualStateValue(holderCount, snapshotDay);
+        uint96 snapshotTotalBalance = _getDualStateValue(totalHolderBalance, snapshotDay);
 
         // Select winner if there are holders
         uint256 lotteryPoolBalance = balanceOf(LOTTERY_POOL);
-        if (
-            snapshotHolderCount > 0 &&
-            snapshotTotalBalance > 0 &&
-            lotteryPoolBalance > 0
-        ) {
+        if (snapshotHolderCount > 0 && snapshotTotalBalance > 0 && lotteryPoolBalance > 0) {
             address winner = _selectWinnerEfficient(snapshotDay, randomSeed);
 
             uint256 lotteryDay = currentDay - 1;
@@ -668,21 +541,15 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             if (prize.amount > 0) {
                 // Try to redeem ETHERIUM for ETH and send to public good
                 address publicGood = PUBLIC_GOODS[currentPublicGoodIndex];
-                currentPublicGoodIndex = uint8(
-                    (currentPublicGoodIndex + 1) % PUBLIC_GOODS.length
-                );
+                currentPublicGoodIndex = uint8((currentPublicGoodIndex + 1) % PUBLIC_GOODS.length);
 
                 // Attempt to send ETH to public good first (1:1 conversion)
-                (bool success, ) = publicGood.call{value: prize.amount}("");
+                (bool success,) = publicGood.call{value: prize.amount}("");
 
                 if (success) {
                     // ETH transfer successful, now burn the ETHERIUM tokens
                     _burn(address(this), prize.amount);
-                    emit PublicGoodsFunded(
-                        publicGood,
-                        prize.amount,
-                        prize.winner
-                    );
+                    emit PublicGoodsFunded(publicGood, prize.amount, prize.winner);
                 } else {
                     // ETH transfer failed, add unclaimed prize to current winner's prize
                     // The current winner will get both prizes when they claim
@@ -716,10 +583,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Ensure we're at least 1 minute into the new day
         uint256 timeIntoDay = (block.timestamp - deploymentTime) % 24 hours;
-        require(
-            timeIntoDay >= TIME_GAP,
-            "Must wait 1 minute into new day before executing lottery"
-        );
+        require(timeIntoDay >= TIME_GAP, "Must wait 1 minute into new day before executing lottery");
 
         _executeLotteryInternal();
     }
@@ -732,10 +596,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Check all 7 slots for prizes belonging to caller
         for (uint256 i = 0; i < 7; i++) {
-            if (
-                unclaimedPrizes[i].winner == msg.sender &&
-                unclaimedPrizes[i].amount > 0
-            ) {
+            if (unclaimedPrizes[i].winner == msg.sender && unclaimedPrizes[i].amount > 0) {
                 uint256 prizeAmount = unclaimedPrizes[i].amount;
                 totalClaimed += prizeAmount;
 
@@ -754,28 +615,15 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         super._update(address(this), msg.sender, totalClaimed);
         uint256 balanceAfter = balanceOf(msg.sender);
 
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        _updateCumulativeBalancesWithExplicitBalances(msg.sender, balanceBefore, balanceAfter);
     }
 
     /**
      * @dev Efficient winner selection using binary search on Fenwick tree (suffix sum version)
      */
-    function _selectWinnerEfficient(
-        uint32 lotteryDay,
-        uint256 randomSeed
-    ) internal view returns (address) {
-        uint96 snapshotTotalBalance = _getDualStateValue(
-            totalHolderBalance,
-            lotteryDay
-        );
-        uint96 snapshotHolderCount = _getDualStateValue(
-            holderCount,
-            lotteryDay
-        );
+    function _selectWinnerEfficient(uint32 lotteryDay, uint256 randomSeed) internal view returns (address) {
+        uint96 snapshotTotalBalance = _getDualStateValue(totalHolderBalance, lotteryDay);
+        uint96 snapshotHolderCount = _getDualStateValue(holderCount, lotteryDay);
 
         // Random number from 1 to total balance
         uint256 winningNumber = (randomSeed % snapshotTotalBalance) + 1;
@@ -818,13 +666,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Get holder info by index (1-indexed for Fenwick tree)
      */
-    function getHolderByIndex(
-        uint256 index
-    ) external view returns (address holder, uint256 balance) {
-        require(
-            index > 0 && index <= holderCount.latestValue,
-            "Index out of bounds"
-        );
+    function getHolderByIndex(uint256 index) external view returns (address holder, uint256 balance) {
+        require(index > 0 && index <= holderCount.latestValue, "Index out of bounds");
         address holderAddress = holderByIndex[index].latestValue;
         return (holderAddress, balanceOf(holderAddress));
     }
@@ -871,11 +714,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Get all unclaimed prizes
      */
-    function getAllUnclaimedPrizes()
-        external
-        view
-        returns (address[7] memory winners, uint96[7] memory amounts)
-    {
+    function getAllUnclaimedPrizes() external view returns (address[7] memory winners, uint96[7] memory amounts) {
         for (uint256 i = 0; i < 7; i++) {
             winners[i] = unclaimedPrizes[i].winner;
             amounts[i] = unclaimedPrizes[i].amount;

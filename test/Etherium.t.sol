@@ -10,7 +10,7 @@ contract EtheriumTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
     address public charlie = address(0x3);
-    
+
     // Event definitions for testing
     event Minted(address indexed to, uint256 ethAmount, uint256 etheriumAmount, uint256 fee);
     event Redeemed(address indexed from, uint256 etheriumAmount, uint256 ethAmount, uint256 fee);
@@ -34,7 +34,7 @@ contract EtheriumTest is Test {
         // Expect Minted event
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, 1 ether, 0.99 ether, 0.01 ether);
-        
+
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
 
@@ -50,12 +50,7 @@ contract EtheriumTest is Test {
         // Check that fee was distributed to lottery pool
         uint256 totalFee = 0.01 ether; // 1% of 1 ETH
 
-        assertEq(
-            etherium.balanceOf(
-                address(0x000000000000107700000Add2E55000000000000)
-            ),
-            totalFee
-        );
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), totalFee);
     }
 
     function testRedeemWithFee() public {
@@ -70,11 +65,11 @@ contract EtheriumTest is Test {
         uint256 redeemAmount = aliceBalance / 2;
         uint256 fee = (redeemAmount * 100) / 10000; // 1% fee
         uint256 netAmount = redeemAmount - fee;
-        
+
         // Expect Redeemed event
         vm.expectEmit(true, true, true, true);
         emit Redeemed(alice, redeemAmount, netAmount, fee);
-        
+
         vm.prank(alice);
         etherium.redeem(redeemAmount);
 
@@ -106,7 +101,7 @@ contract EtheriumTest is Test {
         emit Transfer(alice, bob, netAmount);
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, address(0x000000000000107700000Add2E55000000000000), fee);
-        
+
         // Transfer to bob
         vm.prank(alice);
         etherium.transfer(bob, transferAmount);
@@ -116,10 +111,7 @@ contract EtheriumTest is Test {
         assertEq(etherium.balanceOf(bob), expectedBobBalance);
 
         // Alice balance should decrease by full amount
-        assertEq(
-            etherium.balanceOf(alice),
-            aliceBalanceBefore - transferAmount
-        );
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - transferAmount);
     }
 
     function testHolderTracking() public {
@@ -129,7 +121,7 @@ contract EtheriumTest is Test {
         // Alice mints
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, 1 ether, 0.99 ether, 0.01 ether);
-        
+
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
         assertEq(etherium.getHolderCount(), 1);
@@ -137,7 +129,7 @@ contract EtheriumTest is Test {
         // Bob mints
         vm.expectEmit(true, true, true, true);
         emit Minted(bob, 1 ether, 0.99 ether, 0.01 ether);
-        
+
         vm.prank(bob);
         etherium.mint{value: 1 ether}();
         assertEq(etherium.getHolderCount(), 2);
@@ -146,12 +138,12 @@ contract EtheriumTest is Test {
         uint256 aliceBalance = etherium.balanceOf(alice);
         uint256 fee = (aliceBalance * 100) / 10000;
         uint256 netAmount = aliceBalance - fee;
-        
+
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, bob, netAmount);
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, address(0x000000000000107700000Add2E55000000000000), fee);
-        
+
         vm.prank(alice);
         etherium.transfer(bob, aliceBalance);
 
@@ -170,9 +162,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 1 ether}();
 
         // Record initial lottery pool
-        uint256 lotteryPoolBefore = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 lotteryPoolBefore = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(lotteryPoolBefore > 0);
 
         // Fast forward to day 1 (at least 1 minute in) to trigger lottery for day 0
@@ -182,17 +172,12 @@ contract EtheriumTest is Test {
         // Don't check any specific values since we don't know the winner
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // We don't know winner/amount/day exactly
-        
+
         // Now lottery should execute immediately
         etherium.executeLottery();
 
         // Lottery pool should be distributed
-        assertEq(
-            etherium.balanceOf(
-                address(0x000000000000107700000Add2E55000000000000)
-            ),
-            0
-        );
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), 0);
         assertEq(etherium.lastLotteryDay(), 1);
     }
 
@@ -208,9 +193,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 0.5 ether}();
 
         // Record initial lottery pool
-        uint256 lotteryPoolBefore = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 lotteryPoolBefore = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(lotteryPoolBefore > 0);
 
         // Fast forward to day 1 (at least 1 minute in) to execute lottery for day 0
@@ -219,17 +202,12 @@ contract EtheriumTest is Test {
         // Expect LotteryWon event
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // We don't know winner/amount/day exactly
-        
+
         // Execute lottery with prevrandao
         etherium.executeLottery();
 
         // Lottery pool should be empty
-        assertEq(
-            etherium.balanceOf(
-                address(0x000000000000107700000Add2E55000000000000)
-            ),
-            0
-        );
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), 0);
 
         // One of the holders should have won
         // Can't predict exact winner due to randomness, but total supply should match
@@ -241,7 +219,7 @@ contract EtheriumTest is Test {
         // During minting period: no limit, fees are minted too
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
-        
+
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
 
@@ -265,7 +243,7 @@ contract EtheriumTest is Test {
         // After redemption, minting should work up to original max
         vm.expectEmit(true, true, true, true);
         emit Redeemed(alice, 1 ether, 0.99 ether, 0.01 ether);
-        
+
         vm.prank(alice);
         etherium.redeem(1 ether); // Redeem 1 ETHERIUM
 
@@ -281,7 +259,7 @@ contract EtheriumTest is Test {
         // Bob can now mint up to the redeemed capacity
         vm.expectEmit(true, true, true, true);
         emit Minted(bob, 0.99 ether, 0.9801 ether, 0.0099 ether);
-        
+
         vm.prank(bob);
         etherium.mint{value: 0.99 ether}(); // Should work - exactly the redeemed amount
     }
@@ -294,7 +272,7 @@ contract EtheriumTest is Test {
         // Contract mints ETHERIUM - expect Minted event
         vm.expectEmit(true, true, true, true);
         emit Minted(address(mockContract), 1 ether, 0.99 ether, 0.01 ether);
-        
+
         mockContract.mintEtherium(etherium);
 
         // Check contract is not tracked as holder
@@ -304,7 +282,7 @@ contract EtheriumTest is Test {
         // Regular user mints
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, 1 ether, 0.99 ether, 0.01 ether);
-        
+
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
 
@@ -489,9 +467,7 @@ contract EtheriumTest is Test {
         console.log("Holder count:", etherium.getHolderCount());
 
         // Check the lottery pool has funds
-        uint256 lotteryPoolBalance = etherium.balanceOf(
-            etherium.LOTTERY_POOL()
-        );
+        uint256 lotteryPoolBalance = etherium.balanceOf(etherium.LOTTERY_POOL());
         console.log("Lottery pool balance:", lotteryPoolBalance);
         assertTrue(lotteryPoolBalance > 0, "Lottery pool should have funds");
 
@@ -530,7 +506,7 @@ contract EtheriumTest is Test {
             etherium.executeLottery();
 
             // Check who won by checking unclaimed prizes
-            (address[7] memory winners, ) = etherium.getAllUnclaimedPrizes();
+            (address[7] memory winners,) = etherium.getAllUnclaimedPrizes();
             // The lottery stores prizes at slot day%7
             uint256 lotteryDay = etherium.lastLotteryDay();
             uint256 slot = lotteryDay % 7;
@@ -546,55 +522,28 @@ contract EtheriumTest is Test {
         }
 
         // Calculate expected probabilities based on initial balances
-        uint256 totalBalance = initialAliceBalance +
-            initialBobBalance +
-            initialCharlieBalance;
-        uint256 expectedAliceWins = (initialAliceBalance * rounds) /
-            totalBalance;
+        uint256 totalBalance = initialAliceBalance + initialBobBalance + initialCharlieBalance;
+        uint256 expectedAliceWins = (initialAliceBalance * rounds) / totalBalance;
         uint256 expectedBobWins = (initialBobBalance * rounds) / totalBalance;
-        uint256 expectedCharlieWins = (initialCharlieBalance * rounds) /
-            totalBalance;
+        uint256 expectedCharlieWins = (initialCharlieBalance * rounds) / totalBalance;
 
         console.log("\nResults after", rounds, "rounds:");
         console.log("Alice wins:", aliceWins, "Expected:", expectedAliceWins);
         console.log("Bob wins:", bobWins, "Expected:", expectedBobWins);
-        console.log(
-            "Charlie wins:",
-            charlieWins,
-            "Expected:",
-            expectedCharlieWins
-        );
+        console.log("Charlie wins:", charlieWins, "Expected:", expectedCharlieWins);
 
         // Allow for statistical deviation (roughly 3 standard deviations)
         // For binomial distribution, std dev ≈ sqrt(n * p * (1-p))
         // Using a simplified check: actual should be within 20% of expected for smaller samples
         uint256 tolerance = rounds / 5; // 20% tolerance for 100 rounds
 
-        assertApproxEqAbs(
-            aliceWins,
-            expectedAliceWins,
-            tolerance,
-            "Alice win distribution off"
-        );
-        assertApproxEqAbs(
-            bobWins,
-            expectedBobWins,
-            tolerance,
-            "Bob win distribution off"
-        );
-        assertApproxEqAbs(
-            charlieWins,
-            expectedCharlieWins,
-            tolerance,
-            "Charlie win distribution off"
-        );
+        assertApproxEqAbs(aliceWins, expectedAliceWins, tolerance, "Alice win distribution off");
+        assertApproxEqAbs(bobWins, expectedBobWins, tolerance, "Bob win distribution off");
+        assertApproxEqAbs(charlieWins, expectedCharlieWins, tolerance, "Charlie win distribution off");
 
         // Ensure all rounds after the first 7 had a winner (first 7 fill empty slots)
         uint256 expectedWins = rounds > 7 ? rounds - 7 : rounds;
-        assertTrue(
-            aliceWins + bobWins + charlieWins >= expectedWins,
-            "Not enough rounds had winners"
-        );
+        assertTrue(aliceWins + bobWins + charlieWins >= expectedWins, "Not enough rounds had winners");
     }
 
     function testAllExternalFunctionsTriggerLottery() public {
@@ -616,11 +565,7 @@ contract EtheriumTest is Test {
         // Test 2: transfer() triggers lottery execution
         vm.prank(alice);
         etherium.transfer(bob, 1 ether);
-        assertEq(
-            etherium.lastLotteryDay(),
-            1,
-            "Lottery should execute via transfer"
-        );
+        assertEq(etherium.lastLotteryDay(), 1, "Lottery should execute via transfer");
 
         // Move to day 2
         vm.warp(block.timestamp + 24 hours + 61);
@@ -633,11 +578,7 @@ contract EtheriumTest is Test {
         // Execute via any transaction
         vm.prank(charlie);
         etherium.transfer(alice, 0.1 ether);
-        assertEq(
-            etherium.lastLotteryDay(),
-            2,
-            "Lottery should execute for day 2"
-        );
+        assertEq(etherium.lastLotteryDay(), 2, "Lottery should execute for day 2");
     }
 
     function testBalanceChangesInSnapshotBlockDontAffectLottery() public {
@@ -706,17 +647,13 @@ contract EtheriumTest is Test {
         etherium.mint{value: 0.1 ether}();
 
         // Execute lottery
-        uint256 poolBalance = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolBalance = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolBalance > 0, "Pool should have fees");
         vm.prank(bob);
         etherium.transfer(alice, 0.1 ether);
 
         assertEq(etherium.lastLotteryDay(), 1, "Lottery should be executed");
-        uint256 poolAfter = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolAfter < 0.01 ether, "Pool should be mostly distributed");
     }
 
@@ -735,14 +672,10 @@ contract EtheriumTest is Test {
         // Expect first LotteryWon event
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0);
-        
+
         // Execute first lottery
         etherium.executeLottery();
-        assertEq(
-            etherium.lastLotteryDay(),
-            1,
-            "First lottery should be executed"
-        );
+        assertEq(etherium.lastLotteryDay(), 1, "First lottery should be executed");
 
         // Accumulate more fees
         vm.prank(alice);
@@ -758,14 +691,10 @@ contract EtheriumTest is Test {
         // Expect second LotteryWon event
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0);
-        
+
         // Execute second lottery
         etherium.executeLottery();
-        assertEq(
-            etherium.lastLotteryDay(),
-            2,
-            "Second lottery should be executed"
-        );
+        assertEq(etherium.lastLotteryDay(), 2, "Second lottery should be executed");
     }
 
     function testDelayedLotteryTrigger() public {
@@ -786,16 +715,10 @@ contract EtheriumTest is Test {
         // Execute lottery - will execute for the current day
         etherium.executeLottery();
 
-        assertEq(
-            etherium.lastLotteryDay(),
-            3,
-            "Should have executed lottery for current day"
-        );
+        assertEq(etherium.lastLotteryDay(), 3, "Should have executed lottery for current day");
 
         // Pool should be mostly empty (may have small fees from trigger transactions)
-        uint256 poolAfter = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolAfter < 0.01 ether, "Pool should be mostly distributed");
     }
 
@@ -817,9 +740,7 @@ contract EtheriumTest is Test {
         etherium.transfer(bob, 0.1 ether);
 
         // Pool should be mostly empty
-        uint256 poolAfter = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolAfter < 0.01 ether, "Pool should be mostly empty");
 
         // Advance to next day
@@ -833,11 +754,7 @@ contract EtheriumTest is Test {
         etherium.transfer(bob, 0.001 ether); // Executes
 
         // The lottery should still execute even with minimal prize
-        assertEq(
-            etherium.lastLotteryDay(),
-            2,
-            "Should have executed lottery for day 1 even with minimal prize"
-        );
+        assertEq(etherium.lastLotteryDay(), 2, "Should have executed lottery for day 1 even with minimal prize");
     }
 
     function testDirectPrizeStorage() public {
@@ -858,10 +775,7 @@ contract EtheriumTest is Test {
         console.log("Slot 0 winner:", winner0);
         console.log("Slot 0 amount:", amount0);
 
-        assertTrue(
-            winner0 == alice || winner0 == bob,
-            "Should have a winner in slot 0"
-        );
+        assertTrue(winner0 == alice || winner0 == bob, "Should have a winner in slot 0");
         assertTrue(amount0 > 0, "Should have an amount in slot 0");
     }
 
@@ -879,18 +793,13 @@ contract EtheriumTest is Test {
         etherium.executeLottery();
 
         // Check that there's an unclaimed prize
-        (address[7] memory winners, ) = etherium.getAllUnclaimedPrizes();
-        assertTrue(
-            winners[0] == alice || winners[0] == bob,
-            "Should have a winner"
-        );
+        (address[7] memory winners,) = etherium.getAllUnclaimedPrizes();
+        assertTrue(winners[0] == alice || winners[0] == bob, "Should have a winner");
 
         address winner = winners[0];
 
         // Check the stored prize directly
-        (address storedWinner, uint96 storedAmount) = etherium.unclaimedPrizes(
-            0
-        );
+        (address storedWinner, uint96 storedAmount) = etherium.unclaimedPrizes(0);
         console.log("Stored winner in slot 0:", storedWinner);
         console.log("Test winner variable:", winner);
         console.log("Are they equal?", storedWinner == winner);
@@ -901,11 +810,11 @@ contract EtheriumTest is Test {
         assertTrue(claimableAmount > 0, "Winner should have claimable amount");
 
         uint256 balanceBefore = etherium.balanceOf(winner);
-        
+
         // Expect PrizeClaimed event
         vm.expectEmit(true, true, true, true);
         emit PrizeClaimed(winner, claimableAmount);
-        
+
         vm.prank(winner);
         etherium.claim();
         uint256 balanceAfter = etherium.balanceOf(winner);
@@ -913,11 +822,7 @@ contract EtheriumTest is Test {
         // Verify prize was claimed
         assertTrue(balanceAfter > balanceBefore, "Balance should increase");
         vm.prank(winner);
-        assertEq(
-            etherium.getMyClaimableAmount(),
-            0,
-            "No more claimable amount"
-        );
+        assertEq(etherium.getMyClaimableAmount(), 0, "No more claimable amount");
     }
 
     function testRejectDirectETHTransfer() public {
@@ -925,7 +830,7 @@ contract EtheriumTest is Test {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
         vm.expectRevert("Direct ETH transfers not allowed. Use mint() instead");
-        (bool success, ) = address(etherium).call{value: 1 ether}("");
+        (bool success,) = address(etherium).call{value: 1 ether}("");
         // vm.expectRevert handles the revert, so we don't need to check success
     }
 
@@ -977,15 +882,8 @@ contract EtheriumTest is Test {
 
         // Check all three values are accessible and correct
         assertTrue(etherium.maxSupplyEver() > 0, "Max supply should be set");
-        assertTrue(
-            etherium.lastLotteryDay() > 0,
-            "Last lottery day should be set"
-        );
-        assertEq(
-            etherium.currentPublicGoodIndex(),
-            0,
-            "Public good index should be 0"
-        );
+        assertTrue(etherium.lastLotteryDay() > 0, "Last lottery day should be set");
+        assertEq(etherium.currentPublicGoodIndex(), 0, "Public good index should be 0");
 
         // Execute 7 more lotteries with unclaimed prizes to cycle public goods
         for (uint256 i = 1; i <= 7; i++) {
@@ -996,10 +894,7 @@ contract EtheriumTest is Test {
         }
 
         // Check that currentPublicGoodIndex has cycled
-        assertTrue(
-            etherium.currentPublicGoodIndex() > 0,
-            "Public good index should have cycled"
-        );
+        assertTrue(etherium.currentPublicGoodIndex() > 0, "Public good index should have cycled");
     }
 
     function testETHSentToPublicGoodsNotEtherium() public {
@@ -1030,15 +925,8 @@ contract EtheriumTest is Test {
         }
 
         // Verify public good received ETH, not ETHERIUM
-        assertEq(
-            etherium.balanceOf(publicGood),
-            0,
-            "Public good should have 0 ETHERIUM"
-        );
-        assertTrue(
-            publicGood.balance > initialETHBalance,
-            "Public good should have more ETH"
-        );
+        assertEq(etherium.balanceOf(publicGood), 0, "Public good should have 0 ETHERIUM");
+        assertTrue(publicGood.balance > initialETHBalance, "Public good should have more ETH");
     }
 
     function testUnclaimedPrizeFailedTransferGoesToCurrentWinner() public {
@@ -1060,7 +948,7 @@ contract EtheriumTest is Test {
         etherium.executeLottery();
 
         // Get the first winner
-        (address[7] memory winners, ) = etherium.getAllUnclaimedPrizes();
+        (address[7] memory winners,) = etherium.getAllUnclaimedPrizes();
         address firstWinner = winners[0];
 
         // Execute 7 more lotteries to trigger unclaimed prize distribution
@@ -1078,17 +966,14 @@ contract EtheriumTest is Test {
         // If ETH transfer failed, the current day 8 winner would receive
         // both their prize AND the unclaimed prize from day 1
         address publicGood = etherium.PUBLIC_GOODS(0);
-        assertTrue(
-            publicGood.balance > 0,
-            "Public good should have received ETH"
-        );
+        assertTrue(publicGood.balance > 0, "Public good should have received ETH");
     }
 
     function testCannotMintAfterPeriodWithoutCapacity() public {
         // Mint during minting period
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, 100 ether, 99 ether, 1 ether);
-        
+
         vm.prank(alice);
         etherium.mint{value: 100 ether}();
 
@@ -1098,14 +983,14 @@ contract EtheriumTest is Test {
         // First redemption triggers maxSupplyEver setting
         vm.expectEmit(true, true, true, true);
         emit Redeemed(alice, 10 ether, 9.9 ether, 0.1 ether);
-        
+
         vm.prank(alice);
         etherium.redeem(10 ether);
 
         // Now Bob can mint up to the redeemed amount (minus fees)
         vm.expectEmit(true, true, true, true);
         emit Minted(bob, 9.9 ether, 9.801 ether, 0.099 ether);
-        
+
         vm.prank(bob);
         etherium.mint{value: 9.9 ether}(); // Less than redeemed to account for fees
 
@@ -1138,20 +1023,11 @@ contract EtheriumTest is Test {
 
         // Contract should have minimal ETH left (only lottery pool balance)
         uint256 contractETHAfter = address(etherium).balance;
-        uint256 lotteryPoolBalance = etherium.balanceOf(
-            etherium.LOTTERY_POOL()
-        );
+        uint256 lotteryPoolBalance = etherium.balanceOf(etherium.LOTTERY_POOL());
 
         // Contract ETH = lottery pool tokens (1:1 backing)
-        assertEq(
-            contractETHAfter,
-            lotteryPoolBalance,
-            "Contract ETH should match lottery pool"
-        );
-        assertTrue(
-            contractETHAfter < 2 ether,
-            "Should have less than 2 ETH (just fees)"
-        );
+        assertEq(contractETHAfter, lotteryPoolBalance, "Contract ETH should match lottery pool");
+        assertTrue(contractETHAfter < 2 ether, "Should have less than 2 ETH (just fees)");
     }
 
     function testMaxSupplyNeverExceededWithPublicGoodsDonations() public {
@@ -1171,10 +1047,7 @@ contract EtheriumTest is Test {
 
         uint96 maxSupply = etherium.maxSupplyEver();
         assertTrue(maxSupply > 0, "Max supply should be set");
-        assertTrue(
-            maxSupply >= 199 ether,
-            "Max supply should be around 199-200 ether"
-        );
+        assertTrue(maxSupply >= 199 ether, "Max supply should be around 199-200 ether");
 
         // Execute lotteries for 7 days without claiming to trigger public goods donation
         for (uint256 day = 1; day <= 8; day++) {
@@ -1187,17 +1060,11 @@ contract EtheriumTest is Test {
             etherium.executeLottery();
 
             // Check supply never exceeds max
-            assertTrue(
-                etherium.totalSupply() <= maxSupply,
-                "Supply exceeded max!"
-            );
+            assertTrue(etherium.totalSupply() <= maxSupply, "Supply exceeded max!");
         }
 
         // After public goods donation (burn), supply should be less
-        assertTrue(
-            etherium.totalSupply() < maxSupply,
-            "Supply should decrease after burn"
-        );
+        assertTrue(etherium.totalSupply() < maxSupply, "Supply should decrease after burn");
 
         // Someone redeems
         vm.prank(alice);
@@ -1208,10 +1075,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 10 ether}();
 
         // Supply still shouldn't exceed max
-        assertTrue(
-            etherium.totalSupply() <= maxSupply,
-            "Supply exceeded max after mint!"
-        );
+        assertTrue(etherium.totalSupply() <= maxSupply, "Supply exceeded max after mint!");
     }
 
     function testLotteryWithManyUsersRandomOperations() public {
@@ -1231,16 +1095,12 @@ contract EtheriumTest is Test {
                     // Mint
                     vm.prank(users[i]);
                     etherium.mint{value: 1 ether}();
-                } else if (
-                    action == 1 && etherium.balanceOf(users[i]) > 0.1 ether
-                ) {
+                } else if (action == 1 && etherium.balanceOf(users[i]) > 0.1 ether) {
                     // Transfer
                     uint256 recipient = (i + 1) % 10;
                     vm.prank(users[i]);
                     etherium.transfer(users[recipient], 0.1 ether);
-                } else if (
-                    action == 2 && etherium.balanceOf(users[i]) > 0.5 ether
-                ) {
+                } else if (action == 2 && etherium.balanceOf(users[i]) > 0.5 ether) {
                     // Redeem
                     vm.prank(users[i]);
                     etherium.redeem(0.5 ether);
@@ -1262,10 +1122,7 @@ contract EtheriumTest is Test {
         assertTrue(address(etherium).balance > 0, "Contract should have ETH");
 
         // ETH in contract >= total supply (some may be in lottery pool)
-        assertTrue(
-            address(etherium).balance >= etherium.totalSupply(),
-            "ETH backing should be sufficient"
-        );
+        assertTrue(address(etherium).balance >= etherium.totalSupply(), "ETH backing should be sufficient");
     }
 
     function testUnclaimedPrizeGoesToPublicGood() public {
@@ -1294,7 +1151,7 @@ contract EtheriumTest is Test {
 
             vm.warp(block.timestamp + 24 hours + 61);
             vm.prevrandao(uint256(keccak256(abi.encode(i))));
-            
+
             // On the 7th lottery (i=7), we should see PublicGoodsFunded event
             if (i == 7) {
                 address expectedPublicGood = etherium.PUBLIC_GOODS(0);
@@ -1302,21 +1159,14 @@ contract EtheriumTest is Test {
                 vm.expectEmit(true, true, true, false);
                 emit PublicGoodsFunded(expectedPublicGood, unclaimedAmount, address(0)); // We don't know exact current winner
             }
-            
+
             etherium.executeLottery();
         }
 
         // Check that public goods received ETH (not ETHERIUM tokens)
         address publicGood = etherium.PUBLIC_GOODS(0);
-        assertEq(
-            etherium.balanceOf(publicGood),
-            0,
-            "Public good should not have ETHERIUM tokens"
-        );
-        assertTrue(
-            publicGood.balance > 0,
-            "Public good should have received ETH"
-        );
+        assertEq(etherium.balanceOf(publicGood), 0, "Public good should not have ETHERIUM tokens");
+        assertTrue(publicGood.balance > 0, "Public good should have received ETH");
     }
 
     function testFenwickTreeConsistencyAfterOperations() public {
@@ -1334,12 +1184,7 @@ contract EtheriumTest is Test {
         uint256 suffix1 = etherium.getSuffixSum(1);
 
         // suffix1 should be sum of all holders
-        assertEq(
-            suffix1,
-            etherium.balanceOf(alice) +
-                etherium.balanceOf(bob) +
-                etherium.balanceOf(charlie)
-        );
+        assertEq(suffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(charlie));
 
         // Remove a holder
         uint256 charlieBalance = etherium.balanceOf(charlie);
@@ -1348,10 +1193,7 @@ contract EtheriumTest is Test {
 
         // Verify Fenwick tree updated correctly
         uint256 newSuffix1 = etherium.getSuffixSum(1);
-        assertEq(
-            newSuffix1,
-            etherium.balanceOf(alice) + etherium.balanceOf(bob)
-        );
+        assertEq(newSuffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob));
 
         // Add a new holder
         address david = address(0x4);
@@ -1361,12 +1203,7 @@ contract EtheriumTest is Test {
 
         // Verify tree consistency
         uint256 finalSuffix1 = etherium.getSuffixSum(1);
-        assertEq(
-            finalSuffix1,
-            etherium.balanceOf(alice) +
-                etherium.balanceOf(bob) +
-                etherium.balanceOf(david)
-        );
+        assertEq(finalSuffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(david));
 
         // Now execute lottery to ensure Fenwick tree works for winner selection
         vm.warp(block.timestamp + 24 hours + 61);
@@ -1377,26 +1214,18 @@ contract EtheriumTest is Test {
         etherium.mint{value: 0.1 ether}();
 
         // Execute lottery
-        uint256 poolBalance = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolBalance = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolBalance > 0, "Pool should have fees");
         vm.prank(bob);
         etherium.transfer(alice, 0.1 ether);
 
         // Verify lottery executed successfully
-        uint256 poolAfterExec = etherium.balanceOf(
-            address(0x000000000000107700000Add2E55000000000000)
-        );
+        uint256 poolAfterExec = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(poolAfterExec < 0.01 ether, "Pool should be mostly empty");
     }
 
     // Invariant fuzz test
-    function testFuzz_Invariants(
-        uint8 numUsers,
-        uint256 seed,
-        uint8 numRounds
-    ) public {
+    function testFuzz_Invariants(uint8 numUsers, uint256 seed, uint8 numRounds) public {
         // Bound inputs
         numUsers = uint8(bound(numUsers, 2, 20));
         numRounds = uint8(bound(numRounds, 1, 10));
@@ -1415,9 +1244,7 @@ contract EtheriumTest is Test {
         for (uint256 round = 0; round < numRounds; round++) {
             // Each user performs random action
             for (uint256 i = 0; i < numUsers; i++) {
-                uint256 actionSeed = uint256(
-                    keccak256(abi.encode(seed, round, i))
-                );
+                uint256 actionSeed = uint256(keccak256(abi.encode(seed, round, i)));
                 uint256 action = actionSeed % 4;
 
                 if (action == 0) {
@@ -1434,9 +1261,7 @@ contract EtheriumTest is Test {
                         uint256 transferAmount = balance / 4;
                         uint256 recipient = (i + 1) % numUsers;
                         vm.prank(users[i]);
-                        try
-                            etherium.transfer(users[recipient], transferAmount)
-                        {} catch {}
+                        try etherium.transfer(users[recipient], transferAmount) {} catch {}
                     }
                 } else if (action == 2) {
                     // Redeem
@@ -1448,10 +1273,7 @@ contract EtheriumTest is Test {
                     }
                 } else {
                     // Execute lottery if possible
-                    if (
-                        round > 0 &&
-                        etherium.getCurrentDay() > etherium.lastLotteryDay()
-                    ) {
+                    if (round > 0 && etherium.getCurrentDay() > etherium.lastLotteryDay()) {
                         vm.warp(block.timestamp + 24 hours + 61);
                         vm.prevrandao(actionSeed);
                         try etherium.executeLottery() {} catch {}
@@ -1469,20 +1291,11 @@ contract EtheriumTest is Test {
 
     function _checkInvariants() internal view {
         // Invariant 1: Contract ETH >= Total Supply
-        assertTrue(
-            address(etherium).balance >= etherium.totalSupply(),
-            "Invariant violated: ETH < Total Supply"
-        );
+        assertTrue(address(etherium).balance >= etherium.totalSupply(), "Invariant violated: ETH < Total Supply");
 
         // Invariant 2: Total supply never exceeds max (after minting period)
-        if (
-            block.timestamp > etherium.mintingEndTime() &&
-            etherium.maxSupplyEver() > 0
-        ) {
-            assertTrue(
-                etherium.totalSupply() <= etherium.maxSupplyEver(),
-                "Invariant violated: Supply > Max Supply"
-            );
+        if (block.timestamp > etherium.mintingEndTime() && etherium.maxSupplyEver() > 0) {
+            assertTrue(etherium.totalSupply() <= etherium.maxSupplyEver(), "Invariant violated: Supply > Max Supply");
         }
 
         // Invariant 3: Holder count matches actual holders
@@ -1490,10 +1303,7 @@ contract EtheriumTest is Test {
         assertTrue(holderCount <= 1000, "Too many holders");
 
         // Invariant 4: Lottery day never goes backward
-        assertTrue(
-            etherium.lastLotteryDay() <= etherium.getCurrentDay(),
-            "Lottery day in future"
-        );
+        assertTrue(etherium.lastLotteryDay() <= etherium.getCurrentDay(), "Lottery day in future");
     }
 }
 
@@ -1507,7 +1317,7 @@ contract MockContract {
 
 // Contract that rejects ETH transfers
 contract MockRejectETH {
-    // No receive or fallback function - will reject ETH transfers
+// No receive or fallback function - will reject ETH transfers
 }
 
 // Malicious contract that attempts reentrancy during claim
@@ -1545,16 +1355,9 @@ contract MockERC20 {
         balanceOf[to] += amount;
     }
 
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
