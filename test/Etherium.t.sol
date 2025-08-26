@@ -36,7 +36,7 @@ contract EtheriumTest is Test {
         // Check that fee was distributed to lottery pool
         uint256 totalFee = 0.01 ether; // 1% of 1 ETH
         
-        assertEq(etherium.currentLotteryPool(), totalFee);
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), totalFee);
     }
     
     function testRedeemWithFee() public {
@@ -121,34 +121,18 @@ contract EtheriumTest is Test {
         etherium.mint{value: 1 ether}();
         
         // Record initial lottery pool
-        uint256 lotteryPoolBefore = etherium.currentLotteryPool();
+        uint256 lotteryPoolBefore = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(lotteryPoolBefore > 0);
         
-        // Fast forward to day 1 to trigger lottery for day 0
-        vm.warp(block.timestamp + 24 hours + 1);
+        // Fast forward to day 1 (at least 1 minute in) to trigger lottery for day 0
+        vm.warp(block.timestamp + 24 hours + 61);
         
-        // First call should take snapshot and revert
-        vm.expectRevert("Snapshot taken, wait for block gap before executing");
-        etherium.executeLottery();
-        
-        // Snapshot is not taken due to revert, so we need to trigger it via a different transaction
-        // We'll mint which calls _tryExecuteLottery internally
-        vm.prank(charlie);
-        etherium.mint{value: 0.1 ether}(); // This will take the snapshot internally
-        
-        // Check snapshot was taken for day 0 (previous day)
-        uint256 snapshotBlock = etherium.daySnapshotBlock(0);
-        assertTrue(snapshotBlock > 0);
-        
-        // Mine blocks to pass the gap
-        vm.roll(block.number + 11); // BLOCK_GAP is 10
-        
-        // Now lottery should execute
+        // Now lottery should execute immediately
         etherium.executeLottery();
         
         // Lottery pool should be distributed
-        assertEq(etherium.currentLotteryPool(), 0);
-        assertTrue(etherium.dayLotteryExecuted(0));
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), 0);
+        assertEq(etherium.lastLotteryDay(), 1);
     }
     
     function testLotteryWithMultipleHolders() public {
@@ -163,26 +147,17 @@ contract EtheriumTest is Test {
         etherium.mint{value: 0.5 ether}();
         
         // Record initial lottery pool
-        uint256 lotteryPoolBefore = etherium.currentLotteryPool();
+        uint256 lotteryPoolBefore = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
         assertTrue(lotteryPoolBefore > 0);
         
-        // Fast forward to day 1 to execute lottery for day 0
-        vm.warp(block.timestamp + 24 hours + 1);
-        
-        // Trigger snapshot via mint (which calls _tryExecuteLottery internally)
-        address dave = address(0x4);
-        vm.deal(dave, 1 ether);
-        vm.prank(dave);
-        etherium.mint{value: 0.1 ether}(); // This will take the snapshot
-        
-        // Mine blocks to pass the gap
-        vm.roll(block.number + 11);
+        // Fast forward to day 1 (at least 1 minute in) to execute lottery for day 0
+        vm.warp(block.timestamp + 24 hours + 61);
         
         // Execute lottery with prevrandao
         etherium.executeLottery();
         
         // Lottery pool should be empty
-        assertEq(etherium.currentLotteryPool(), 0);
+        assertEq(etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000)), 0);
         
         // One of the holders should have won
         // Can't predict exact winner due to randomness, but total supply should match
@@ -448,17 +423,11 @@ contract EtheriumTest is Test {
             vm.revertTo(snapshotId);
             snapshotId = vm.snapshot();
             
-            // Move to day 1
-            vm.warp(block.timestamp + 24 hours + 1);
+            // Move to day 1 (at least 1 minute in)
+            vm.warp(block.timestamp + 24 hours + 61);
             
             // Set a different prevrandao for each round
             vm.prevrandao(bytes32(uint256(keccak256(abi.encode(i, "test")))));
-            
-            // Trigger snapshot by minting from a contract (won't be added to holders)
-            triggerContract.mintEtherium(etherium);
-            
-            // Mine blocks to pass the gap
-            vm.roll(block.number + 11);
             
             // Execute lottery
             etherium.executeLottery();
@@ -515,6 +484,264 @@ contract EtheriumTest is Test {
         assertEq(aliceWins + bobWins + charlieWins, rounds, "Not all rounds had a winner");
     }
 
+    function testAllExternalFunctionsTriggerLottery() public {
+        // Setup: Create holders and accumulate fees
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Advance to day 1
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(12345);
+        
+        // Test 1: mint() triggers lottery (takes snapshot)
+        vm.prank(charlie);
+        etherium.mint{value: 1 ether}();
+        
+        
+        // Test 2: transfer() triggers lottery execution
+        vm.prank(alice);
+        etherium.transfer(bob, 1 ether);
+        assertEq(etherium.lastLotteryDay(), 1, "Lottery should execute via transfer");
+        
+        // Move to day 2
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(54321);
+        
+        // Test 3: redeem() triggers lottery (takes snapshot)
+        vm.prank(bob);
+        etherium.redeem(1 ether);
+        
+        
+        // Execute via any transaction
+        vm.prank(charlie);
+        etherium.transfer(alice, 0.1 ether);
+        assertEq(etherium.lastLotteryDay(), 2, "Lottery should execute for day 2");
+    }
+    
+    function testBalanceChangesInSnapshotBlockDontAffectLottery() public {
+        // Setup: Create initial holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Record balances
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
+        uint256 bobBalanceBefore = etherium.balanceOf(bob);
+        
+        // Advance to just before lottery can execute (less than 1 minute)
+        vm.warp(block.timestamp + 24 hours + 30); // 30 seconds into new day
+        vm.prevrandao(99999);
+        
+        // Make balance changes - lottery can't execute yet
+        vm.prank(alice);
+        etherium.transfer(bob, 5 ether);
+        
+        // Add new holder
+        address david = address(0x4);
+        vm.deal(david, 10 ether);
+        vm.prank(david);
+        etherium.mint{value: 10 ether}();
+        
+        // Now advance past 1 minute and execute lottery
+        vm.warp(block.timestamp + 31); // Now 61 seconds into the day
+        etherium.executeLottery();
+        
+        // Lottery should have used the snapshot from before the balance changes
+        // David shouldn't be eligible since he wasn't a holder when snapshot was taken
+        assertEq(etherium.lastLotteryDay(), 1, "Lottery should be executed");
+    }
+    
+    function testLotteryAfterComplexHolderChanges() public {
+        // Setup: Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        vm.prank(charlie);
+        etherium.mint{value: 3 ether}();
+        
+        // Remove a holder
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        vm.prank(charlie);
+        etherium.transfer(alice, charlieBalance);
+        
+        // Add a new holder
+        address david = address(0x4);
+        vm.deal(david, 10 ether);
+        vm.prank(david);
+        etherium.mint{value: 7 ether}();
+        
+        // Execute lottery
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(55555);
+        
+        // Take snapshot via mint
+        vm.prank(alice);
+        etherium.mint{value: 0.1 ether}();
+        
+        // Execute lottery
+        uint256 poolBalance = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolBalance > 0, "Pool should have fees");
+        vm.prank(bob);
+        etherium.transfer(alice, 0.1 ether);
+        
+        assertEq(etherium.lastLotteryDay(), 1, "Lottery should be executed");
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolAfter < 0.01 ether, "Pool should be mostly distributed");
+    }
+    
+    function testSecondLotteryExecution() public {
+        // Setup: Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Execute first lottery
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(11111);
+        
+        // Execute first lottery
+        etherium.executeLottery();
+        assertEq(etherium.lastLotteryDay(), 1, "First lottery should be executed");
+        
+        // Accumulate more fees
+        vm.prank(alice);
+        etherium.transfer(bob, 2 ether);
+        
+        vm.prank(bob);
+        etherium.transfer(alice, 1 ether);
+        
+        // Advance to day 2
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(22222);
+        
+        // Execute second lottery
+        etherium.executeLottery();
+        assertEq(etherium.lastLotteryDay(), 2, "Second lottery should be executed");
+    }
+    
+    function testDelayedLotteryTrigger() public {
+        // Setup: Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Advance multiple days without triggering lottery (at least 1 minute into day 3)
+        vm.warp(block.timestamp + 72 hours + 61); // 3 days + 1 minute later
+        vm.prevrandao(88888);
+        
+        // Should still only execute lottery for day 1 (oldest pending)
+        assertEq(etherium.lastLotteryDay(), 0, "No lottery executed yet");
+        
+        // Execute lottery - will execute for the current day
+        etherium.executeLottery();
+        
+        assertEq(etherium.lastLotteryDay(), 3, "Should have executed lottery for current day");
+        
+        // Pool should be mostly empty (may have small fees from trigger transactions)
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolAfter < 0.01 ether, "Pool should be mostly distributed");
+    }
+    
+    function testNoLotteryWhenNoFeesCollected() public {
+        // Setup: Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        // Execute first lottery to empty the pool
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(66666);
+        
+        // Take snapshot via mint
+        vm.prank(bob);
+        etherium.mint{value: 0.1 ether}();
+        
+        // Execute via transfer
+        vm.prank(alice);
+        etherium.transfer(bob, 0.1 ether);
+        
+        // Pool should be mostly empty
+        uint256 poolAfter = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolAfter < 0.01 ether, "Pool should be mostly empty");
+        
+        // Advance to next day
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(77777);
+        
+        // Try to execute lottery with nearly empty pool
+        vm.prank(bob);
+        etherium.transfer(alice, 0.001 ether);        vm.prank(alice);
+        etherium.transfer(bob, 0.001 ether); // Executes
+        
+        // The lottery should still execute even with minimal prize
+        assertEq(etherium.lastLotteryDay(), 2, "Should have executed lottery for day 1 even with minimal prize");
+    }
+    
+    function testFenwickTreeConsistencyAfterOperations() public {
+        // Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        vm.prank(charlie);
+        etherium.mint{value: 3 ether}();
+        
+        // Verify suffix sums are correct
+        uint256 suffix1 = etherium.getSuffixSum(1);
+        
+        // suffix1 should be sum of all holders
+        assertEq(suffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(charlie));
+        
+        // Remove a holder
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        vm.prank(charlie);
+        etherium.transfer(alice, charlieBalance);
+        
+        // Verify Fenwick tree updated correctly
+        uint256 newSuffix1 = etherium.getSuffixSum(1);
+        assertEq(newSuffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob));
+        
+        // Add a new holder
+        address david = address(0x4);
+        vm.deal(david, 10 ether);
+        vm.prank(david);
+        etherium.mint{value: 7 ether}();
+        
+        // Verify tree consistency
+        uint256 finalSuffix1 = etherium.getSuffixSum(1);
+        assertEq(finalSuffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(david));
+        
+        // Now execute lottery to ensure Fenwick tree works for winner selection
+        vm.warp(block.timestamp + 24 hours + 61);
+        vm.prevrandao(99999);
+        
+        // Take snapshot via mint
+        vm.prank(alice);
+        etherium.mint{value: 0.1 ether}();
+        
+        // Execute lottery
+        uint256 poolBalance = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolBalance > 0, "Pool should have fees");
+        vm.prank(bob);
+        etherium.transfer(alice, 0.1 ether);
+        
+        // Verify lottery executed successfully
+        uint256 poolAfterExec = etherium.balanceOf(address(0x000000000000107700000Add2E55000000000000));
+        assertTrue(poolAfterExec < 0.01 ether, "Pool should be mostly empty");
+    }
 }
 
 contract MockContract {

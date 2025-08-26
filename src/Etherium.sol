@@ -32,11 +32,8 @@ contract Etherium is ERC20, ReentrancyGuard {
     uint256 public maxSupplyEver; // Set after minting period based on what was minted
 
     // Lottery state
-    uint256 public lastLotteryTime;
-    mapping(uint256 day => bool executed) public dayLotteryExecuted;
-    mapping(uint256 day => uint256 snapshotBlock) public daySnapshotBlock;
-    mapping(uint256 day => uint256 seed) public dayRandomSeed;
-    uint256 public constant BLOCK_GAP = 10; // Number of blocks to wait after snapshot before using prevrandao
+    uint256 public lastLotteryDay;
+    uint256 public constant TIME_GAP = 1 minutes; // Must be 1 minute into new day before lottery can execute
 
     // Struct to maintain rolling 2-day history for each value
     // Stores current and previous value with the day of last update
@@ -82,7 +79,6 @@ contract Etherium is ERC20, ReentrancyGuard {
         uint256 fee
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
-    event DaySnapshotTaken(uint256 indexed day, uint256 blockNumber);
     event PepeUSDLocked(
         address indexed user,
         uint256 pepeAmount,
@@ -94,7 +90,6 @@ contract Etherium is ERC20, ReentrancyGuard {
     constructor() ERC20("Etherium", "ETHERIUM") {
         deploymentTime = block.timestamp;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
-        lastLotteryTime = deploymentTime;
     }
 
     function decimals() public pure override returns (uint8) {
@@ -388,13 +383,16 @@ contract Etherium is ERC20, ReentrancyGuard {
 
     /**
      * @dev Update Fenwick tree at index with delta (suffix sum version)
-     * Updates downward, no max size needed
+     * For suffix sums, we update positions whose range includes the index
      */
     function _fenwickUpdate(uint256 index, int256 delta) internal {
         uint32 currentDay = uint32(getCurrentDay());
-
-        while (index > 0) {
-            DualState storage treeNode = fenwickTree[index];
+        
+        // Update all nodes whose suffix range includes this index
+        // Start from index and move backward
+        uint256 i = index;
+        while (i > 0) {
+            DualState storage treeNode = fenwickTree[i];
             uint112 currentSum = treeNode.latestValue;
             uint112 newSum;
 
@@ -402,11 +400,14 @@ contract Etherium is ERC20, ReentrancyGuard {
                 newSum = currentSum + uint112(uint256(delta));
             } else {
                 uint112 decrease = uint112(uint256(-delta));
-                newSum = currentSum > decrease ? currentSum - decrease : 0;
+                newSum = currentSum - decrease;
             }
 
             _updateDualState(treeNode, newSum, currentDay);
-            index -= index & uint256(-int256(index)); // Move down the tree
+            
+            // Move to previous node whose range includes our index
+            // For suffix tree: move to i - lowbit(i)
+            i -= i & uint256(-int256(i));
         }
     }
 
@@ -464,27 +465,28 @@ contract Etherium is ERC20, ReentrancyGuard {
             _updateDualState(totalHolderBalance, newTotalBalance, currentDay);
         } else if (balanceAfter == 0 && currentIndex > 0) {
             // Remove holder - use the balance before removal
-            uint112 currentCount = holderCount.latestValue;
             uint112 currentTotalBalance = totalHolderBalance.latestValue;
 
             // Update Fenwick tree before removal
             _fenwickUpdate(currentIndex, -int256(balanceBefore));
-
-            uint112 newTotalBalance = currentTotalBalance >
-                uint112(balanceBefore)
-                ? currentTotalBalance - uint112(balanceBefore)
-                : 0;
+            
+            uint112 newTotalBalance = currentTotalBalance - uint112(balanceBefore);
 
             _updateDualState(totalHolderBalance, newTotalBalance, currentDay);
 
-            // If not last holder, move last holder to this position
+            // Compact holders by moving the last holder to the removed position
+            uint112 currentCount = holderCount.latestValue;
+            
             if (currentIndex < currentCount) {
                 address lastHolder = holderByIndex[currentCount].latestValue;
-                uint256 lastHolderBalance = balanceOf(lastHolder);
-
-                // Update Fenwick tree: remove last holder's balance from old position
-                _fenwickUpdate(currentCount, -int256(lastHolderBalance));
-
+                
+                // Get the last holder's balance from the Fenwick tree at their position
+                // This is their balance BEFORE any concurrent updates
+                uint112 lastHolderFenwickBalance = fenwickTree[currentCount].latestValue;
+                
+                // Remove last holder's balance from old position
+                _fenwickUpdate(currentCount, -int256(uint256(lastHolderFenwickBalance)));
+                
                 // Move last holder to current position
                 _updateDualAddress(
                     holderByIndex[currentIndex],
@@ -496,21 +498,20 @@ contract Etherium is ERC20, ReentrancyGuard {
                     uint112(currentIndex),
                     currentDay
                 );
-
-                // Update Fenwick tree: add last holder's balance to new position
-                _fenwickUpdate(currentIndex, int256(lastHolderBalance));
+                
+                // Add last holder's balance to new position
+                _fenwickUpdate(currentIndex, int256(uint256(lastHolderFenwickBalance)));
             }
-
-            // Mark removed holder with index 0 (deleted)
+            
+            // Clear the removed holder's index and last position
             _updateDualState(indexByHolder[account], 0, currentDay);
-
-            // Clear last holder slot
             _updateDualAddress(
                 holderByIndex[currentCount],
                 address(0),
                 currentDay
             );
-
+            
+            // Decrement holder count
             _updateDualState(holderCount, currentCount - 1, currentDay);
         } else if (currentIndex > 0) {
             // Update existing holder
@@ -537,54 +538,49 @@ contract Etherium is ERC20, ReentrancyGuard {
 
 
     /**
-     * @dev Internal function to try executing pending lotteries
+     * @dev Internal function to try executing pending lottery
      * Called before state-changing operations to ensure winners are determined first
      */
     function _tryExecuteLottery() internal {
-        uint256 currentDayNumber = getCurrentDay();
-
-        // Check if we can execute any lottery (day 1 onwards)
-        if (currentDayNumber < 1) return;
-
-        uint256 lotteryDay = currentDayNumber - 1;
-
-        // Skip if already executed
-        if (dayLotteryExecuted[lotteryDay]) return;
-
-        // Take snapshot if not taken yet
-        if (daySnapshotBlock[lotteryDay] == 0) {
-            daySnapshotBlock[lotteryDay] = block.number;
-            emit DaySnapshotTaken(lotteryDay, block.number);
-            return; // Wait for block gap before executing
-        }
-
-        // Check if enough blocks have passed since snapshot
-        if (block.number < daySnapshotBlock[lotteryDay] + BLOCK_GAP) return;
-
-        _executeLotteryInternal(lotteryDay);
+        uint256 currentDay = getCurrentDay();
+        
+        // No lottery on day 0
+        if (currentDay == 0) return;
+        
+        // Check if there's a pending lottery (pool has funds and day changed)
+        uint256 poolBalance = balanceOf(LOTTERY_POOL);
+        if (poolBalance == 0) return;
+        
+        // If day changed since last lottery, we have a pending lottery
+        if (currentDay <= lastLotteryDay) return;
+        
+        // Ensure we're at least 1 minute into the new day to prevent manipulation
+        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 24 hours;
+        if (timeIntoDay < TIME_GAP) return;
+        
+        _executeLotteryInternal();
     }
 
     /**
      * @dev Internal lottery execution logic
      */
-    function _executeLotteryInternal(uint256 lotteryDay) internal {
-        // Use prevrandao as the source of randomness
-        // We wait BLOCK_GAP blocks after snapshot to make manipulation harder
+    function _executeLotteryInternal() internal {
         uint256 randomSeed = block.prevrandao;
-        dayRandomSeed[lotteryDay] = randomSeed;
-
-        uint32 lotteryDayUint32 = uint32(lotteryDay);
-
-        // Get holder count and total balance from the lottery day's snapshot
+        uint256 currentDay = getCurrentDay();
+        
+        // Use snapshot from when the lottery became pending (lastLotteryDay)
+        uint32 snapshotDay = uint32(lastLotteryDay);
+        
+        // Get holder count and total balance from the snapshot day
         uint112 snapshotHolderCount = _getDualStateValue(
             holderCount,
-            lotteryDayUint32
+            snapshotDay
         );
         uint112 snapshotTotalBalance = _getDualStateValue(
             totalHolderBalance,
-            lotteryDayUint32
+            snapshotDay
         );
-
+        
         // Select winner if there are holders
         uint256 lotteryPoolBalance = balanceOf(LOTTERY_POOL);
         if (
@@ -593,54 +589,47 @@ contract Etherium is ERC20, ReentrancyGuard {
             lotteryPoolBalance > 0
         ) {
             address winner = _selectWinnerEfficient(
-                lotteryDayUint32,
+                snapshotDay,
                 randomSeed
             );
-
+            
             // Get winner balance before prize
             uint256 winnerBalanceBefore = balanceOf(winner);
-
+            
             // Transfer prize from lottery pool to winner
-            _burn(LOTTERY_POOL, lotteryPoolBalance);
-            _mint(winner, lotteryPoolBalance);
-
+            super._update(LOTTERY_POOL, winner, lotteryPoolBalance);
+            
             // Get winner balance after prize
             uint256 winnerBalanceAfter = balanceOf(winner);
-
+            
             _updateCumulativeBalancesWithExplicitBalances(winner, winnerBalanceBefore, winnerBalanceAfter);
-            emit LotteryWon(winner, lotteryPoolBalance, lotteryDay);
+            emit LotteryWon(winner, lotteryPoolBalance, currentDay - 1);
         }
-
-        dayLotteryExecuted[lotteryDay] = true;
-        lastLotteryTime = block.timestamp;
+        
+        // Update last lottery day
+        lastLotteryDay = currentDay;
     }
 
     /**
      * @dev Public function to execute daily lottery
      */
     function executeLottery() external nonReentrant {
-        uint256 currentDayNumber = getCurrentDay();
+        uint256 currentDay = getCurrentDay();
+        require(currentDay > 0, "Must wait until day 1 for first lottery");
+        
+        uint256 poolBalance = balanceOf(LOTTERY_POOL);
+        require(poolBalance > 0, "No pending lottery (empty pool)");
+        
+        require(currentDay > lastLotteryDay, "No pending lottery (same day)");
+        
+        // Ensure we're at least 1 minute into the new day
+        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 24 hours;
         require(
-            currentDayNumber >= 1,
-            "Must wait until day 1 to execute first lottery"
+            timeIntoDay >= TIME_GAP,
+            "Must wait 1 minute into new day before executing lottery"
         );
-        uint256 lotteryDay = currentDayNumber - 1;
-        require(!dayLotteryExecuted[lotteryDay], "Lottery already executed");
-
-        // Take snapshot if not taken yet
-        if (daySnapshotBlock[lotteryDay] == 0) {
-            daySnapshotBlock[lotteryDay] = block.number;
-            emit DaySnapshotTaken(lotteryDay, block.number);
-            revert("Snapshot taken, wait for block gap before executing");
-        }
-
-        // Ensure enough blocks have passed since snapshot
-        require(
-            block.number >= daySnapshotBlock[lotteryDay] + BLOCK_GAP,
-            "Must wait for block gap after snapshot"
-        );
-
-        _executeLotteryInternal(lotteryDay);
+        
+        _executeLotteryInternal();
     }
 
     /**
