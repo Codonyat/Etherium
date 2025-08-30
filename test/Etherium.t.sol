@@ -166,7 +166,7 @@ contract EtheriumTest is Test {
         assertTrue(lotteryPoolBefore > 0);
 
         // Fast forward to day 1 (at least 1 minute in) to trigger lottery for day 0
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
 
         // Expect LotteryWon event - either alice or bob will win
         // Don't check any specific values since we don't know the winner
@@ -197,7 +197,7 @@ contract EtheriumTest is Test {
         assertTrue(lotteryPoolBefore > 0);
 
         // Fast forward to day 1 (at least 1 minute in) to execute lottery for day 0
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
 
         // Expect LotteryWon event
         vm.expectEmit(false, false, false, false);
@@ -370,7 +370,7 @@ contract EtheriumTest is Test {
         console.log("Charlie:", (charlieBalance * 100) / totalBalance, "%");
 
         // Simulate lottery day 1
-        vm.warp(block.timestamp + 24 hours + 1);
+        vm.warp(block.timestamp + 25 hours + 1);
 
         // Take snapshot
         MockContract trigger = new MockContract();
@@ -497,7 +497,7 @@ contract EtheriumTest is Test {
             }
 
             // Move to next day (at least 1 minute in)
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
 
             // Set a different prevrandao for each round
             vm.prevrandao(bytes32(uint256(keccak256(abi.encode(i, "test")))));
@@ -555,7 +555,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Advance to day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(12345);
 
         // Test 1: mint() triggers lottery (takes snapshot)
@@ -568,7 +568,7 @@ contract EtheriumTest is Test {
         assertEq(etherium.lastLotteryDay(), 1, "Lottery should execute via transfer");
 
         // Move to day 2
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(54321);
 
         // Test 3: redeem() triggers lottery (takes snapshot)
@@ -594,7 +594,7 @@ contract EtheriumTest is Test {
         uint256 bobBalanceBefore = etherium.balanceOf(bob);
 
         // Advance to just before lottery can execute (less than 1 minute)
-        vm.warp(block.timestamp + 24 hours + 30); // 30 seconds into new day
+        vm.warp(block.timestamp + 25 hours + 30); // 30 seconds into new day
         vm.prevrandao(99999);
 
         // Make balance changes - lottery can't execute yet
@@ -639,7 +639,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 7 ether}();
 
         // Execute lottery
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(55555);
 
         // Take snapshot via mint
@@ -666,7 +666,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute first lottery
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(11111);
 
         // Expect first LotteryWon event
@@ -685,7 +685,7 @@ contract EtheriumTest is Test {
         etherium.transfer(alice, 1 ether);
 
         // Advance to day 2
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(22222);
 
         // Expect second LotteryWon event
@@ -706,7 +706,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Advance multiple days without triggering lottery (at least 1 minute into day 3)
-        vm.warp(block.timestamp + 72 hours + 61); // 3 days + 1 minute later
+        vm.warp(block.timestamp + 75 hours + 61); // 3 days (25h each) + 1 minute later
         vm.prevrandao(88888);
 
         // Should still only execute lottery for day 1 (oldest pending)
@@ -728,7 +728,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 10 ether}();
 
         // Execute first lottery to empty the pool
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(66666);
 
         // Take snapshot via mint
@@ -744,7 +744,7 @@ contract EtheriumTest is Test {
         assertTrue(poolAfter < 0.01 ether, "Pool should be mostly empty");
 
         // Advance to next day
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(77777);
 
         // Try to execute lottery with nearly empty pool
@@ -766,7 +766,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute lottery for day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(12345);
         etherium.executeLottery();
 
@@ -788,7 +788,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute lottery for day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(12345);
         etherium.executeLottery();
 
@@ -847,7 +847,7 @@ contract EtheriumTest is Test {
         etherium.redeem(0.5 ether); // nonReentrant function
 
         // Execute lottery to create a claimable prize
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         etherium.executeLottery(); // nonReentrant function
 
         // All functions executed without issues, guard is working
@@ -877,7 +877,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute a lottery to update lastLotteryDay
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         etherium.executeLottery();
 
         // Check all three values are accessible and correct
@@ -889,7 +889,7 @@ contract EtheriumTest is Test {
         for (uint256 i = 1; i <= 7; i++) {
             vm.prank(alice);
             etherium.transfer(bob, 0.1 ether);
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
             etherium.executeLottery();
         }
 
@@ -908,7 +908,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute lottery for day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(12345);
         etherium.executeLottery();
 
@@ -920,7 +920,7 @@ contract EtheriumTest is Test {
         for (uint256 i = 1; i <= 7; i++) {
             vm.prank(alice);
             etherium.transfer(bob, 0.1 ether);
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
             etherium.executeLottery();
         }
 
@@ -943,7 +943,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute lottery for day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(11111);
         etherium.executeLottery();
 
@@ -957,7 +957,7 @@ contract EtheriumTest is Test {
             vm.prank(alice);
             etherium.transfer(bob, 0.1 ether);
 
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
             vm.prevrandao(uint256(keccak256(abi.encode(i))));
             etherium.executeLottery();
         }
@@ -1055,7 +1055,7 @@ contract EtheriumTest is Test {
             vm.prank(alice);
             etherium.transfer(bob, 1 ether);
 
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
             vm.prevrandao(uint256(keccak256(abi.encode(day))));
             etherium.executeLottery();
 
@@ -1109,7 +1109,7 @@ contract EtheriumTest is Test {
 
             // Execute lottery every round
             if (round > 0) {
-                vm.warp(block.timestamp + 24 hours + 61);
+                vm.warp(block.timestamp + 25 hours + 61);
                 vm.prevrandao(uint256(keccak256(abi.encode("lottery", round))));
                 if (etherium.balanceOf(etherium.LOTTERY_POOL()) > 0) {
                     etherium.executeLottery();
@@ -1134,7 +1134,7 @@ contract EtheriumTest is Test {
         etherium.mint{value: 5 ether}();
 
         // Execute lottery for day 1
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(11111);
         etherium.executeLottery();
 
@@ -1149,7 +1149,7 @@ contract EtheriumTest is Test {
             vm.prank(alice);
             etherium.transfer(bob, 0.1 ether);
 
-            vm.warp(block.timestamp + 24 hours + 61);
+            vm.warp(block.timestamp + 25 hours + 61);
             vm.prevrandao(uint256(keccak256(abi.encode(i))));
 
             // On the 7th lottery (i=7), we should see PublicGoodsFunded event
@@ -1206,7 +1206,7 @@ contract EtheriumTest is Test {
         assertEq(finalSuffix1, etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(david));
 
         // Now execute lottery to ensure Fenwick tree works for winner selection
-        vm.warp(block.timestamp + 24 hours + 61);
+        vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(99999);
 
         // Take snapshot via mint
@@ -1274,7 +1274,7 @@ contract EtheriumTest is Test {
                 } else {
                     // Execute lottery if possible
                     if (round > 0 && etherium.getCurrentDay() > etherium.lastLotteryDay()) {
-                        vm.warp(block.timestamp + 24 hours + 61);
+                        vm.warp(block.timestamp + 25 hours + 61);
                         vm.prevrandao(actionSeed);
                         try etherium.executeLottery() {} catch {}
                     }

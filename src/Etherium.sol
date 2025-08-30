@@ -505,7 +505,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         if (currentDay <= lastLotteryDay) return;
 
         // Ensure we're at least 1 minute into the new day to prevent manipulation
-        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 24 hours;
+        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 25 hours;
         if (timeIntoDay < TIME_GAP) return;
 
         _executeLotteryInternal();
@@ -582,7 +582,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         require(currentDay > lastLotteryDay, "No pending lottery (same day)");
 
         // Ensure we're at least 1 minute into the new day
-        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 24 hours;
+        uint256 timeIntoDay = (block.timestamp - deploymentTime) % 25 hours;
         require(timeIntoDay >= TIME_GAP, "Must wait 1 minute into new day before executing lottery");
 
         _executeLotteryInternal();
@@ -653,7 +653,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * @dev Get current day number
      */
     function getCurrentDay() public view returns (uint256) {
-        return (block.timestamp - deploymentTime) / 24 hours;
+        return (block.timestamp - deploymentTime) / 25 hours;
     }
 
     /**
