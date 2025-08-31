@@ -5,18 +5,29 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "./interfaces/IExternalTokens.sol";
 
+interface IWETH {
+    function deposit() external payable;
+    function withdraw(uint256) external;
+    function transfer(address, uint256) external returns (bool);
+    function transferFrom(address, address, uint256) external returns (bool);
+    function balanceOf(address) external view returns (uint256);
+    function approve(address, uint256) external returns (bool);
+}
+
 /**
  * @title Etherium
- * @dev ERC20 token backed by ETH with daily lottery using prevrandao
- * - 1 ETH = 1 ETHERIUM (18 decimals)
- * - 1% fee on mint/burn/transfer (100% to lottery pool)
+ * @dev ERC20 token backed by ETH with daily lottery and auction mechanics
+ * - During 7-day minting period: 1 ETH = 1000 ETHERIUM (both 18 decimals)
+ * - Redemption: Proportional share of contract's ETH (ETHERIUM * ETH balance / total supply)
+ * - 1% fee on mint/burn/transfer (split between lottery and auction pools)
  * - Daily lottery for random holder using prevrandao
+ * - Daily auctions using WETH to prevent DoS attacks
  * - Users can lock 100 PepeUSD during minting period to mint without fees
- * - Efficient winner selection using cumulative sum tree
+ * - Efficient winner selection using Fenwick tree (Binary Indexed Tree)
  * - Uses transient storage for reentrancy guard (EIP-1153) for gas efficiency
  */
 contract Etherium is ERC20, ReentrancyGuardTransient {
-    // Conversion: 1 ETH = 1 ETHERIUM (both 18 decimals)
+    // Conversion: 1 ETH = 1000 ETHERIUM during minting period (both 18 decimals)
     uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
@@ -88,6 +99,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     // PepeUSD integration
     IERC20 public constant PEPEUSD =
         IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
+    
+    // WETH integration for auctions (mainnet address)
+    IWETH public constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     // Track PepeUSD locked per user during minting period
     mapping(address user => uint256 amount) public pepeUSDLocked;
@@ -134,8 +148,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     // Packed struct: 160 + 96 + 96 + 112 + 32 = 496 bits (uses 2 slots)
     struct Auction {
         address currentBidder;   // 160 bits
-        uint96 currentBid;       // 96 bits - ETH amount bid
-        uint96 minBid;           // 96 bits - Minimum bid required
+        uint96 currentBid;       // 96 bits - WETH amount bid
+        uint96 minBid;           // 96 bits - Minimum bid required (in WETH)
         uint112 etheriumAmount;  // 112 bits - ETHERIUM amount being auctioned
         uint32 auctionDay;       // 32 bits - Day of the auction
     }
@@ -166,14 +180,16 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     }
 
     /**
-     * @dev Reject direct ETH transfers
+     * @dev Accept ETH only from WETH contract (for withdrawals)
      */
     receive() external payable {
-        revert("Direct ETH transfers not allowed. Use mint() instead");
+        require(msg.sender == address(WETH), "Direct ETH transfers not allowed. Use mint() instead");
     }
 
     /**
      * @dev Mint ETHERIUM by depositing ETH (standard minting with fees)
+     * During minting period: 1 ETH = 1000 ETHERIUM
+     * After minting period: Can only mint up to available capacity
      */
     function mint() external payable nonReentrant {
         require(msg.value > 0, "Must send ETH");
@@ -240,6 +256,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Mint ETHERIUM fee-free by locking 100 PepeUSD
+     * Each lock of 100 PepeUSD allows one fee-free mint
+     * 1 ETH = 1000 ETHERIUM (no fees deducted)
      */
     function mintFeeFree() external payable nonReentrant {
         require(msg.value > 0, "Must send ETH");
@@ -331,6 +349,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Redeem ETHERIUM for ETH
+     * Returns proportional share of contract's ETH balance (minus 1% fee)
      */
     function redeem(uint256 amount) external nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
@@ -985,10 +1004,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 currentDay = getCurrentDay();
 
         // Finalize previous auction if it exists
-        if (
-            currentAuction.auctionDay != 0 &&
-            currentAuction.currentBidder != address(0)
-        ) {
+        if (currentAuction.auctionDay != 0) {
             _finalizeAuction();
         }
 
@@ -1036,6 +1052,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             return;
         }
 
+        // Convert WETH to ETH for the winning bid
+        // This is safe because we control when this happens (no external call that could revert)
+        WETH.withdraw(currentAuction.currentBid);
+
         uint256 slot = currentAuction.auctionDay % 14;
 
         // Check if this slot has an unclaimed prize
@@ -1072,16 +1092,19 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Place a bid in the current auction
-     * The bidder must send ETH that is at least 10% higher than the current bid
+     * The bidder must have approved WETH that is at least 10% higher than the current bid
      * Winning bid gets the auctioned ETHERIUM tokens
-     * Previous bidder gets their ETH refunded immediately
+     * Previous bidder gets their WETH refunded immediately
      *
      * We enforce a 10% minimum increment to make auctions more accessible to non-bot participants.
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
      * that might otherwise place marginally higher bids repeatedly.
+     * 
+     * Using WETH prevents griefing attacks where malicious bidders could block refunds
+     * by reverting in their receive() function.
      */
-    function bid() external payable nonReentrant {
+    function bid(uint256 bidAmount) external nonReentrant {
         require(currentAuction.auctionDay != 0, "No active auction");
 
         uint256 currentDay = getCurrentDay();
@@ -1095,7 +1118,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             ? currentAuction.minBid  // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
-        require(msg.value >= minBid, "Bid too low");
+        require(bidAmount >= minBid, "Bid too low");
+
+        // Transfer WETH from bidder to contract
+        require(WETH.transferFrom(msg.sender, address(this), bidAmount), "WETH transfer failed");
 
         // Store previous bidder info
         address previousBidder = currentAuction.currentBidder;
@@ -1103,14 +1129,13 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Update auction state
         currentAuction.currentBidder = msg.sender;
-        currentAuction.currentBid = uint96(msg.value);
+        currentAuction.currentBid = uint96(bidAmount);
 
-        emit BidPlaced(msg.sender, msg.value, currentAuction.auctionDay);
+        emit BidPlaced(msg.sender, bidAmount, currentAuction.auctionDay);
 
-        // Refund previous bidder if exists
+        // Refund previous bidder if exists (in WETH)
         if (previousBidder != address(0)) {
-            (bool success, ) = previousBidder.call{value: previousBid}("");
-            require(success, "Failed to refund previous bidder");
+            require(WETH.transfer(previousBidder, previousBid), "WETH refund failed");
             emit BidRefunded(previousBidder, previousBid);
         }
     }
