@@ -180,10 +180,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     }
 
     /**
-     * @dev Accept ETH only from WETH contract (for withdrawals)
+     * @dev Accept ETH from anyone - donations benefit all token holders proportionally
      */
     receive() external payable {
-        require(msg.sender == address(WETH), "Direct ETH transfers not allowed. Use mint() instead");
+        // Accept all ETH transfers with no data
+        // This allows:
+        // 1. WETH withdrawals for auctions
+        // 2. Community donations that increase backing value
+        // 3. Failed public goods transfers to not revert
     }
 
     /**

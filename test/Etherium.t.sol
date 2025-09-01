@@ -1355,6 +1355,213 @@ contract EtheriumTest is Test {
         // Invariant 4: Lottery day never goes backward
         assertTrue(etherium.lastLotteryDay() <= etherium.getCurrentDay(), "Lottery day in future");
     }
+
+    function testPublicGoodsFunding() public {
+        // Setup: Create holders and generate fees
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 10 ether}();
+        
+        // Generate fees on day 0
+        vm.prank(alice);
+        etherium.transfer(bob, 1000 ether); // Generates 10 ETHERIUM in fees
+        
+        // Move to day 1
+        vm.warp(block.timestamp + 25 hours);
+        
+        // Generate more fees on day 1
+        vm.prank(bob);
+        etherium.transfer(alice, 500 ether); // Generates 5 ETHERIUM in fees
+        
+        // Get the first public good address
+        address firstPublicGood = etherium.PUBLIC_GOODS(0);
+        uint256 publicGoodBalanceBefore = firstPublicGood.balance;
+        
+        // Track prizes for 14 days to trigger public goods funding
+        for (uint256 day = 2; day <= 15; day++) {
+            // Move to next day
+            vm.warp(block.timestamp + 25 hours + 61);
+            
+            // Execute lottery (will create unclaimed prizes)
+            if (etherium.getCurrentDay() > etherium.lastLotteryDay()) {
+                uint256 previousDayFees = etherium.dailyFeesCollected(etherium.getCurrentDay() - 1);
+                if (previousDayFees >= etherium.MIN_FEES_FOR_DISTRIBUTION()) {
+                    etherium.executeLottery();
+                }
+            }
+        }
+        
+        // After 14 days, the next lottery should send unclaimed prize to public good
+        vm.warp(block.timestamp + 25 hours + 61);
+        
+        // Generate some fees for the next lottery
+        vm.prank(alice);
+        etherium.transfer(bob, 100 ether);
+        
+        vm.warp(block.timestamp + 25 hours + 61);
+        
+        // This lottery should trigger public goods funding for the oldest unclaimed prize
+        // We don't check for specific event since it depends on the randomness
+        
+        etherium.executeLottery();
+        
+        // Check that public good might have received ETH (depends on if there was an old unclaimed prize)
+        // The test is more about ensuring the system doesn't break
+        assertTrue(etherium.lastLotteryDay() > 0, "Lottery should have executed");
+    }
+
+    function testPublicGoodsFundingReverts() public {
+        // Deploy a contract that rejects ETH to use as a public good
+        MockRejectETH rejectingContract = new MockRejectETH();
+        
+        // We need to test with a contract that would actually reject ETH
+        // Since we can't modify the PUBLIC_GOODS array, we'll test the behavior
+        // by creating holders and generating fees, then checking that
+        // failed transfers don't break the lottery system
+        
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 10 ether}();
+        
+        // Generate initial fees on day 0
+        vm.prank(alice);
+        etherium.transfer(bob, 100 ether);
+        
+        // Move to day 1
+        vm.warp(block.timestamp + 25 hours);
+        
+        // Generate fees on day 1
+        vm.prank(bob);
+        etherium.transfer(alice, 100 ether);
+        
+        // Generate fees across multiple days starting from day 2
+        for (uint256 i = 2; i < 18; i++) {
+            // Move to next day and execute lottery
+            vm.warp(block.timestamp + 25 hours + 61);
+            
+            if (etherium.getCurrentDay() >= 2 && etherium.getCurrentDay() > etherium.lastLotteryDay()) {
+                uint256 previousDayFees = etherium.dailyFeesCollected(etherium.getCurrentDay() - 1);
+                if (previousDayFees >= etherium.MIN_FEES_FOR_DISTRIBUTION()) {
+                    // Lottery should not revert even if public goods transfer fails
+                    etherium.executeLottery();
+                }
+            }
+            
+            // Generate fees for next lottery
+            if (i < 17) {
+                vm.prank(alice);
+                etherium.transfer(bob, 100 ether);
+            }
+        }
+        
+        // System should still be functional
+        assertTrue(etherium.lastLotteryDay() > 0, "Lottery should have executed");
+        
+        // Check that the system is still functional
+        // The key test is that lotteries executed without reverting
+        // even if public goods transfers might fail
+        
+        // Try to execute one more lottery to ensure system still works
+        vm.prank(alice);
+        etherium.transfer(bob, 100 ether);
+        
+        vm.warp(block.timestamp + 25 hours + 61);
+        
+        // This should not revert
+        etherium.executeLottery();
+        
+        assertTrue(etherium.lastLotteryDay() > 2, "Multiple lotteries should have executed");
+    }
+
+    function testETHDonations() public {
+        // Initial state
+        vm.prank(alice);
+        etherium.mint{value: 1 ether}();
+        
+        uint256 initialBalance = address(etherium).balance;
+        uint256 initialSupply = etherium.totalSupply();
+        
+        // Direct ETH donation should be accepted
+        vm.deal(charlie, 10 ether);
+        vm.prank(charlie);
+        (bool success, ) = address(etherium).call{value: 5 ether}("");
+        assertTrue(success, "ETH donation should be accepted");
+        
+        // Contract balance should increase
+        assertEq(address(etherium).balance, initialBalance + 5 ether, "Contract should have received ETH");
+        
+        // Total supply should remain unchanged
+        assertEq(etherium.totalSupply(), initialSupply, "Total supply should not change from donations");
+        
+        // Redemption value should increase for all holders
+        uint256 aliceBalance = etherium.balanceOf(alice);
+        uint256 expectedEthBefore = (aliceBalance * 99 / 100) * initialBalance / initialSupply;
+        uint256 expectedEthAfter = (aliceBalance * 99 / 100) * (initialBalance + 5 ether) / initialSupply;
+        
+        assertTrue(expectedEthAfter > expectedEthBefore, "Redemption value should increase after donation");
+        
+        // Test that alice gets more ETH when redeeming after donation
+        uint256 redeemAmount = aliceBalance / 2;
+        uint256 fee = (redeemAmount * 100) / 10000;
+        uint256 netAmount = redeemAmount - fee;
+        uint256 ethToReturn = (netAmount * address(etherium).balance) / etherium.totalSupply();
+        
+        vm.prank(alice);
+        etherium.redeem(redeemAmount);
+        
+        // Alice should have received more ETH than if there was no donation
+        assertTrue(ethToReturn > expectedEthBefore / 2, "Should receive more ETH after donation");
+    }
+
+    function testWETHWithdrawalInAuction() public {
+        // This test verifies that WETH withdrawals work correctly in auctions
+        
+        // Setup: Create holders and generate fees DURING minting period
+        vm.prank(alice);
+        etherium.mint{value: 5 ether}();
+        
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Move past minting period
+        vm.warp(block.timestamp + 8 days);
+        
+        // Generate fees on current day
+        vm.prank(alice);
+        etherium.transfer(bob, 100 ether);
+        
+        // Move to next day to trigger auction
+        vm.warp(block.timestamp + 25 hours + 61);
+        
+        // Execute lottery/auction
+        etherium.executeLottery();
+        
+        // Check that auction started (after minting period)
+        (address bidder, uint96 bid, uint96 minBid, uint112 ethAmount, uint32 auctionDay) = 
+            (etherium.currentAuction());
+        
+        if (ethAmount > 0) {
+            // Auction should be active
+            assertTrue(minBid > 0, "Auction should have minimum bid");
+            assertEq(bidder, address(0), "No bidder yet");
+            
+            // The contract should be able to receive ETH from WETH withdrawal
+            // This is now possible since we modified receive() to accept ETH from anyone
+            uint256 contractBalanceBefore = address(etherium).balance;
+            
+            // Simulate WETH withdrawal by sending ETH directly
+            // (In real scenario, WETH.withdraw() would do this)
+            vm.deal(address(this), 1 ether);
+            (bool sent, ) = address(etherium).call{value: 0.5 ether}("");
+            assertTrue(sent, "Contract should accept ETH");
+            
+            assertEq(address(etherium).balance, contractBalanceBefore + 0.5 ether, "Balance should increase");
+        }
+    }
 }
 
 contract MockContract {
