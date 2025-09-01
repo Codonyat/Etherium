@@ -99,9 +99,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     // PepeUSD integration
     IERC20 public constant PEPEUSD =
         IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
-    
+
     // WETH integration for auctions (mainnet address)
-    IWETH public constant WETH = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    IWETH public constant WETH =
+        IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     // Track PepeUSD locked per user during minting period
     mapping(address user => uint256 amount) public pepeUSDLocked;
@@ -147,11 +148,11 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     // Auction state
     // Packed struct: 160 + 96 + 96 + 112 + 32 = 496 bits (uses 2 slots)
     struct Auction {
-        address currentBidder;   // 160 bits
-        uint96 currentBid;       // 96 bits - WETH amount bid
-        uint96 minBid;           // 96 bits - Minimum bid required (in WETH)
-        uint112 etheriumAmount;  // 112 bits - ETHERIUM amount being auctioned
-        uint32 auctionDay;       // 32 bits - Day of the auction
+        address currentBidder; // 160 bits
+        uint96 currentBid; // 96 bits - WETH amount bid
+        uint96 minBid; // 96 bits - Minimum bid required (in WETH)
+        uint112 etheriumAmount; // 112 bits - ETHERIUM amount being auctioned
+        uint32 auctionDay; // 32 bits - Day of the auction
     }
 
     Auction public currentAuction;
@@ -208,7 +209,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 netEtherium;
 
         // Get balance before minting
-        uint256 balanceBefore = balanceOf(msg.sender);
 
         if (block.timestamp <= mintingEndTime) {
             // During minting period: 1 ETH = 1000 ETHERIUM
@@ -240,20 +240,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         fee = (etheriumToMint * FEE_PERCENT) / BASIS_POINTS;
         netEtherium = etheriumToMint - fee;
 
+        // Mint uses _atomicUpdate internally, so Fenwick tree is updated atomically
         _mint(msg.sender, netEtherium);
         if (fee > 0) {
             _mint(FEES_POOL, fee);
             dailyFeesCollected[getCurrentDay()] += fee;
         }
 
-        // Get balance after minting and fee transfer
-        uint256 balanceAfter = balanceOf(msg.sender);
-
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        // No need for manual Fenwick update - handled atomically in _update
 
         emit Minted(msg.sender, msg.value, netEtherium, fee);
     }
@@ -300,20 +294,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             );
         }
 
-        // Get balance before minting
-        uint256 balanceBefore = balanceOf(msg.sender);
-
         // Mint full amount to user (no fees)
+        // _mint uses _atomicUpdate internally, so Fenwick tree is updated atomically
         _mint(msg.sender, etheriumToMint);
-
-        // Get balance after minting
-        uint256 balanceAfter = balanceOf(msg.sender);
-
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
 
         emit PepeUSDLocked(
             msg.sender,
@@ -375,32 +358,51 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 ethToReturn = (netEtherium * address(this).balance) /
             totalSupply();
 
-        // Get balance before redeeming
-        uint256 balanceBefore = balanceOf(msg.sender);
-
-        // First transfer fees to fees pool
+        // Transfer fees atomically (Fenwick tree updated automatically)
         if (fee > 0) {
-            super._update(msg.sender, FEES_POOL, fee);
+            _atomicUpdate(msg.sender, FEES_POOL, fee);
             dailyFeesCollected[getCurrentDay()] += fee;
         }
 
-        // Then burn the remainder from user
+        // Burn the remainder from user atomically (Fenwick tree updated automatically)
         _burn(msg.sender, netEtherium);
-
-        // Get balance after burning
-        uint256 balanceAfter = balanceOf(msg.sender);
-
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
 
         // Transfer proportional ETH back to user
         (bool success, ) = msg.sender.call{value: ethToReturn}("");
         require(success, "ETH transfer failed");
 
         emit Redeemed(msg.sender, amount, ethToReturn, fee);
+    }
+
+    /**
+     * @dev Atomic balance update that ensures Fenwick tree consistency
+     * This function should be used for ALL internal balance changes to maintain atomicity
+     */
+    function _atomicUpdate(address from, address to, uint256 value) internal {
+        // Get balances BEFORE the update
+        uint256 fromBalanceBefore = from != address(0) ? balanceOf(from) : 0;
+        uint256 toBalanceBefore = to != address(0) ? balanceOf(to) : 0;
+
+        // Perform the actual balance update
+        super._update(from, to, value);
+
+        // Get balances AFTER the update
+        uint256 fromBalanceAfter = from != address(0) ? balanceOf(from) : 0;
+        uint256 toBalanceAfter = to != address(0) ? balanceOf(to) : 0;
+
+        // Update Fenwick tree atomically with balance changes
+        // All filtering (address(0), contracts, synthetic addresses) handled internally
+        _updateCumulativeBalancesWithExplicitBalances(
+            from,
+            fromBalanceBefore,
+            fromBalanceAfter
+        );
+
+        _updateCumulativeBalancesWithExplicitBalances(
+            to,
+            toBalanceBefore,
+            toBalanceAfter
+        );
     }
 
     /**
@@ -413,13 +415,13 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     ) internal override {
         // Redirect external transfers to this contract to FEES_POOL
         if (to == address(this)) {
-            super._update(from, FEES_POOL, value);
+            _atomicUpdate(from, FEES_POOL, value);
             return;
         }
 
-        // Skip fee logic for minting and burning (they handle fees separately)
+        // For minting and burning, use atomic update directly
         if (from == address(0) || to == address(0)) {
-            super._update(from, to, value);
+            _atomicUpdate(from, to, value);
             return;
         }
 
@@ -432,34 +434,22 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 fee = (value * FEE_PERCENT) / BASIS_POINTS;
         uint256 netAmount = value - fee;
 
-        // Get balances BEFORE the transfer
-        uint256 fromBalanceBefore = balanceOf(from);
-        uint256 toBalanceBefore = balanceOf(to);
-
-        // Transfer net amount to recipient
-        super._update(from, to, netAmount);
-
-        // Transfer fees to fees pool
-        if (fee > 0) {
-            super._update(from, FEES_POOL, fee);
-            dailyFeesCollected[getCurrentDay()] += fee;
+        // Use atomic updates for both the transfer and fee
+        // This ensures Fenwick tree consistency
+        // For self-transfers, we still need to emit the Transfer event
+        if (from == to) {
+            // Self-transfer: emit event but skip the no-op balance update
+            emit Transfer(from, to, netAmount);
+        } else {
+            // Normal transfer: update balances and emit event via _atomicUpdate
+            _atomicUpdate(from, to, netAmount);
         }
 
-        // Get balances AFTER the transfer
-        uint256 fromBalanceAfter = balanceOf(from);
-        uint256 toBalanceAfter = balanceOf(to);
-
-        // Update holder tracking with actual balance changes
-        _updateCumulativeBalancesWithExplicitBalances(
-            from,
-            fromBalanceBefore,
-            fromBalanceAfter
-        );
-        _updateCumulativeBalancesWithExplicitBalances(
-            to,
-            toBalanceBefore,
-            toBalanceAfter
-        );
+        // Transfer fees to fees pool atomically
+        if (fee > 0) {
+            _atomicUpdate(from, FEES_POOL, fee);
+            dailyFeesCollected[getCurrentDay()] += fee;
+        }
     }
 
     /**
@@ -582,8 +572,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 balanceBefore,
         uint256 balanceAfter
     ) internal {
+        if (account == address(0)) return; // Skip zero address (minting/burning)
         if (account.code.length > 0) return; // Skip contracts
-        if (account == LOT_POOL) return; // Skip synthetic address
+        if (account == LOT_POOL || account == FEES_POOL) return; // Skip synthetic addresses
 
         uint32 currentDay = uint32(getCurrentDay());
         uint256 currentIndex = indexByHolder[account].latestValue;
@@ -708,7 +699,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Get fees from previous day (day before current)
         uint256 feesToDistribute = dailyFeesCollected[currentDay - 1];
-        
+
         // Skip lottery/auction for dust amounts
         // This ensures both lottery and auction get meaningful amounts when split
         if (feesToDistribute < MIN_FEES_FOR_DISTRIBUTION) return;
@@ -747,17 +738,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         );
 
         // Select winner if there are holders
-        if (
-            snapshotHolderCount > 0 &&
-            snapshotTotalBalance > 0
-        ) {
+        if (snapshotHolderCount > 0 && snapshotTotalBalance > 0) {
             address winner = _selectWinnerEfficient(snapshotDay, randomSeed);
 
             uint256 lotteryDay = currentDay - 1; // The day whose fees we're distributing
             uint256 slot = lotteryDay % 14; // Use 14 slots to handle lottery/auction alternation
 
             // Transfer prize from fees pool to lottery pool for holding
-            super._update(FEES_POOL, LOT_POOL, feesToDistribute);
+            _atomicUpdate(FEES_POOL, LOT_POOL, feesToDistribute);
 
             // Check if this slot has an unclaimed prize
             UnclaimedPrize storage prize = unclaimedPrizes[slot];
@@ -822,7 +810,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Get fees from previous day
         uint256 feesToDistribute = dailyFeesCollected[currentDay - 1];
-        require(feesToDistribute >= MIN_FEES_FOR_DISTRIBUTION, "Insufficient fees to distribute");
+        require(
+            feesToDistribute >= MIN_FEES_FOR_DISTRIBUTION,
+            "Insufficient fees to distribute"
+        );
 
         // Split fees 50/50 between lottery and auction
         uint256 lotteryShare = feesToDistribute / 2;
@@ -864,15 +855,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         require(totalClaimed > 0, "No prizes to claim");
 
         // Transfer all claimed prizes at once from lottery pool
-        uint256 balanceBefore = balanceOf(msg.sender);
-        super._update(LOT_POOL, msg.sender, totalClaimed);
-        uint256 balanceAfter = balanceOf(msg.sender);
-
-        _updateCumulativeBalancesWithExplicitBalances(
-            msg.sender,
-            balanceBefore,
-            balanceAfter
-        );
+        // _atomicUpdate handles Fenwick tree updates automatically
+        _atomicUpdate(LOT_POOL, msg.sender, totalClaimed);
     }
 
     /**
@@ -1016,10 +1000,13 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // MinBid = (ETH balance * feesToDistribute) / totalSupply
         // Round up to ensure we never sell below backing value
         // Overflow safety: balance < 2^96, feesToDistribute < 2^112, product < 2^208
-        uint256 minBid = (address(this).balance * feesToDistribute + totalSupply() - 1) / totalSupply();
+        uint256 minBid = (address(this).balance *
+            feesToDistribute +
+            totalSupply() -
+            1) / totalSupply();
 
         // Transfer fees from fees pool to lottery pool for auction
-        super._update(FEES_POOL, LOT_POOL, feesToDistribute);
+        _atomicUpdate(FEES_POOL, LOT_POOL, feesToDistribute);
 
         // Start new auction
         currentAuction = Auction({
@@ -1044,7 +1031,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         if (currentAuction.currentBidder == address(0)) {
             if (currentAuction.etheriumAmount > 0) {
                 // Add unclaimed auction amount back to fees pool for next day
-                super._update(
+                _atomicUpdate(
                     LOT_POOL,
                     FEES_POOL,
                     currentAuction.etheriumAmount
@@ -1104,7 +1091,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
      * that might otherwise place marginally higher bids repeatedly.
-     * 
+     *
      * Using WETH prevents griefing attacks where malicious bidders could block refunds
      * by reverting in their receive() function.
      */
@@ -1119,13 +1106,16 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Determine minimum bid required
         // Overflow safety: currentBid < 2^96, 110 < 2^7, product < 2^103 (no overflow)
         uint256 minBid = currentAuction.currentBid == 0
-            ? currentAuction.minBid  // Use stored minimum for first bid
+            ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
         require(bidAmount >= minBid, "Bid too low");
 
         // Transfer WETH from bidder to contract
-        require(WETH.transferFrom(msg.sender, address(this), bidAmount), "WETH transfer failed");
+        require(
+            WETH.transferFrom(msg.sender, address(this), bidAmount),
+            "WETH transfer failed"
+        );
 
         // Store previous bidder info
         address previousBidder = currentAuction.currentBidder;
@@ -1139,7 +1129,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
         // Refund previous bidder if exists (in WETH)
         if (previousBidder != address(0)) {
-            require(WETH.transfer(previousBidder, previousBid), "WETH refund failed");
+            require(
+                WETH.transfer(previousBidder, previousBid),
+                "WETH refund failed"
+            );
             emit BidRefunded(previousBidder, previousBid);
         }
     }
