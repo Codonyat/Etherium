@@ -929,6 +929,47 @@ contract EtheriumTest is Test {
         assertTrue(winners2[3 % 14] != address(0), "Day 3 prize should exist");
     }
 
+    function testDay0FeesDistributedOnDay1() public {
+        // This test verifies that fees collected on day 0 are distributed on day 1
+        // Setup: Create holders
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}();
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}();
+        
+        // Generate fees on day 0
+        vm.prank(alice);
+        etherium.transfer(bob, 100 ether);
+        
+        // Calculate expected day 0 fees
+        // Minting fees: 100 ETHERIUM (Alice) + 50 ETHERIUM (Bob) = 150 ETHERIUM
+        // Transfer fee: 1 ETHERIUM
+        uint256 expectedDay0Fees = 151 ether;
+        
+        // Verify day 0 fees are tracked
+        assertEq(etherium.getCurrentDay(), 0, "Should be day 0");
+        assertEq(etherium.dailyFeesCollected(0), expectedDay0Fees, "Day 0 fees should be 151 ether");
+        
+        // Move to day 1 (at least 1 minute in) and execute lottery
+        vm.warp(block.timestamp + 25 hours + 61);
+        vm.prevrandao(12345);
+        
+        // Expect LotteryWon event for day 0's fees
+        vm.expectEmit(false, true, true, true);
+        emit LotteryWon(address(0), expectedDay0Fees, 0); // Day 0's fees
+        
+        // Execute lottery on day 1 for day 0's fees
+        etherium.executeLottery();
+        
+        // Verify lottery executed
+        assertEq(etherium.lastLotteryDay(), 1, "Lottery should be executed on day 1");
+        
+        // Verify prize is stored in slot 0 (day 0 % 14)
+        (address[14] memory winners, uint112[14] memory amounts) = etherium.getAllUnclaimedPrizes();
+        assertTrue(winners[0] != address(0), "Day 0 prize should be stored in slot 0");
+        assertEq(amounts[0], expectedDay0Fees, "Prize amount should match day 0 fees");
+    }
+
     function testDelayedLotteryTrigger() public {
         // Setup: Create holders
         vm.prank(alice);

@@ -688,8 +688,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     function _tryExecuteLotteryAndAuction() internal {
         uint256 currentDay = getCurrentDay();
 
-        // No lottery/auction until day 2 (need previous day's fees)
-        if (currentDay < 2) return;
+        // No lottery/auction until day 1 (need previous day's fees)
+        if (currentDay < 1) return;
 
         // If day changed since last lottery, we have a pending lottery/auction
         if (currentDay <= lastLotteryDay) return;
@@ -793,8 +793,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     function executeLottery() external nonReentrant {
         uint256 currentDay = getCurrentDay();
         require(
-            currentDay >= 2,
-            "Must wait until day 2 for first lottery/auction"
+            currentDay >= 1,
+            "Must wait until day 1 for first lottery/auction"
         );
 
         require(
