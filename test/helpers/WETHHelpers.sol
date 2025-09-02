@@ -40,11 +40,11 @@ contract MockWETH {
     function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
         require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
-        
+
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
         allowance[from][msg.sender] -= amount;
-        
+
         emit Transfer(from, to, amount);
         return true;
     }
@@ -59,7 +59,7 @@ import {Test} from "forge-std/Test.sol";
 
 abstract contract WETHTestBase is Test {
     IWETH public weth;
-    
+
     function setupWETH() internal {
         // Deploy mock WETH at the expected address
         MockWETH mockWeth = new MockWETH();
@@ -68,7 +68,7 @@ abstract contract WETHTestBase is Test {
         vm.etch(wethAddress, deployedCode);
         weth = IWETH(wethAddress);
     }
-    
+
     function getWETHAndApprove(address user, address spender, uint256 amount) internal {
         vm.startPrank(user);
         weth.deposit{value: amount}();

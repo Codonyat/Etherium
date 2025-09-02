@@ -35,20 +35,20 @@ contract EtheriumAuctionTest is WETHTestBase {
         // Generate fees during minting period
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         // Fast forward past minting period
         vm.warp(block.timestamp + 8 days + 1 hours);
-        
+
         // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
         vm.prank(alice);
         etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
-        
+
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         etherium.executeLottery();
 
         // Get auction details
-        (, , uint96 minBid, , ) = etherium.currentAuction();
+        (,, uint96 minBid,,) = etherium.currentAuction();
 
         // Alice bids with WETH
         getWETHAndApprove(alice, address(etherium), 1 ether);
@@ -63,9 +63,9 @@ contract EtheriumAuctionTest is WETHTestBase {
 
         // Verify Alice got refunded in WETH
         assertEq(weth.balanceOf(alice), 1 ether, "Alice should be refunded");
-        
+
         // Verify Bob is current bidder
-        (address currentBidder, , , , ) = etherium.currentAuction();
+        (address currentBidder,,,,) = etherium.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
@@ -73,20 +73,20 @@ contract EtheriumAuctionTest is WETHTestBase {
         // Generate fees
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         // Fast forward past minting period
         vm.warp(block.timestamp + 8 days + 1 hours);
-        
+
         // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
         vm.prank(alice);
         etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
-        
+
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         etherium.executeLottery();
 
         // Place bid
-        (, , uint96 minBid, , ) = etherium.currentAuction();
+        (,, uint96 minBid,,) = etherium.currentAuction();
         getWETHAndApprove(alice, address(etherium), 1 ether);
         vm.prank(alice);
         etherium.bid(minBid);
@@ -105,7 +105,7 @@ contract EtheriumAuctionTest is WETHTestBase {
 
         // Verify WETH was converted to ETH
         uint256 contractWETHAfter = weth.balanceOf(address(etherium));
-        
+
         assertEq(contractWETHAfter, 0, "Contract should have no WETH");
         // The important thing is that WETH was successfully withdrawn and converted to ETH
         // The ETH balance may change due to public goods funding, but WETH should be zero
@@ -115,34 +115,34 @@ contract EtheriumAuctionTest is WETHTestBase {
         // Setup auction
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
         etherium.transfer(bob, 1000 ether);
-        
+
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         etherium.executeLottery();
 
-        (, , uint96 minBid, , ) = etherium.currentAuction();
-        
+        (,, uint96 minBid,,) = etherium.currentAuction();
+
         // First bid at minimum
         getWETHAndApprove(alice, address(etherium), 1 ether);
         vm.prank(alice);
         etherium.bid(minBid);
-        
+
         // Try to bid with less than 10% increase
         uint256 lowBid = (minBid * 109) / 100; // 9% increase
         getWETHAndApprove(bob, address(etherium), 1 ether);
         vm.prank(bob);
         vm.expectRevert("Bid too low");
         etherium.bid(lowBid);
-        
+
         // Bid with exactly 10% increase should work
         uint256 validBid = (minBid * 110) / 100;
         vm.prank(bob);
         etherium.bid(validBid);
-        
-        (address currentBidder, , , , ) = etherium.currentAuction();
+
+        (address currentBidder,,,,) = etherium.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
@@ -150,30 +150,30 @@ contract EtheriumAuctionTest is WETHTestBase {
         // Generate fees
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
         etherium.transfer(bob, 1000 ether);
-        
+
         // Day 8 - Start auction but don't bid (distributes day 7's fees)
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         etherium.executeLottery();
-        
+
         // Generate more fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
         etherium.transfer(alice, 500 ether); // Generate 5 token fee
-        
+
         // Get FEES_POOL balance before rollover
         uint256 feesPoolBefore = etherium.balanceOf(etherium.FEES_POOL());
-        
+
         // Day 9 - Previous auction ends without bids, new lottery/auction starts
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        
+
         etherium.executeLottery();
-        
+
         // After auction rollover, funds should be back in FEES_POOL
         uint256 feesPoolAfter = etherium.balanceOf(etherium.FEES_POOL());
-        
+
         // The rolled over amount from the failed auction goes back to FEES_POOL
         // This ensures it will be distributed in the next lottery/auction
         // The auction (with 5 tokens) had no bids, so it returns to FEES_POOL
@@ -186,10 +186,10 @@ contract EtheriumAuctionTest is WETHTestBase {
         vm.prank(alice);
         etherium.mint{value: 100 ether}(); // Alice gets 99,000 tokens after 1% fee
         // During minting period, 1% fee is minted as tokens: 100 ETH * 1000 ratio * 1% = 1000 tokens
-        
+
         // After minting period (day 8 = 8 * 25 hours from start)
         vm.warp(block.timestamp + 8 * 25 hours);
-        
+
         // Alice has 99,000 tokens
         // Transfer 10,000 tokens (generates 100 token fee)
         vm.prank(alice);
@@ -197,20 +197,20 @@ contract EtheriumAuctionTest is WETHTestBase {
         // Bob got 9,900 tokens (10,000 - 100 fee), transfers some back
         vm.prank(bob);
         etherium.transfer(alice, 9_000 ether); // generates 90 token fee
-        
+
         // Check FEES_POOL balance for accumulated fees
         uint256 totalFees = etherium.balanceOf(etherium.FEES_POOL());
         // We expect accumulated fees: 1000 (from minting) + 100 + 90 = 1190 ether
         assertEq(totalFees, 1190 ether, "FEES_POOL should have 1190 tokens in fees");
-        
+
         // Execute lottery/auction for the day's fees
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        
+
         // We generated fees on day 8, so we execute on day 9 to distribute day 8's fees
         etherium.executeLottery();
-        
+
         // Verify auction has half the fees (595 tokens)
-        (, , , uint112 auctionAmount, ) = etherium.currentAuction();
+        (,,, uint112 auctionAmount,) = etherium.currentAuction();
         assertEq(auctionAmount, 595 ether, "Auction should have 595 tokens");
     }
 }
@@ -220,7 +220,7 @@ contract MaliciousBidder {
     receive() external payable {
         revert("I always revert!");
     }
-    
+
     fallback() external payable {
         revert("I always revert!");
     }
@@ -234,9 +234,9 @@ contract EtheriumAuctionSecurityTest is WETHTestBase {
     function setUp() public {
         setupWETH();
         etherium = new Etherium();
-        
+
         vm.deal(alice, 100 ether);
-        
+
         MaliciousBidder malicious = new MaliciousBidder();
         maliciousBidder = address(malicious);
         vm.deal(maliciousBidder, 100 ether);
@@ -246,15 +246,15 @@ contract EtheriumAuctionSecurityTest is WETHTestBase {
         // Setup auction
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
         etherium.transfer(address(0x99), 1000 ether);
-        
+
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         etherium.executeLottery();
 
-        (, , uint96 minBid, , ) = etherium.currentAuction();
+        (,, uint96 minBid,,) = etherium.currentAuction();
 
         // Malicious bidder places bid
         getWETHAndApprove(maliciousBidder, address(etherium), 1 ether);
@@ -269,8 +269,8 @@ contract EtheriumAuctionSecurityTest is WETHTestBase {
 
         // Verify malicious bidder got WETH refund
         assertEq(weth.balanceOf(maliciousBidder), 1 ether, "Should receive WETH refund");
-        
-        (address currentBidder, , , , ) = etherium.currentAuction();
+
+        (address currentBidder,,,,) = etherium.currentAuction();
         assertEq(currentBidder, alice, "Alice should be current bidder");
     }
 }

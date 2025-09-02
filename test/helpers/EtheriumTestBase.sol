@@ -6,14 +6,14 @@ import {Etherium} from "../../src/Etherium.sol";
 
 abstract contract EtheriumTestBase is Test {
     Etherium public etherium;
-    
+
     // Common test addresses
     address public alice = address(0x1);
     address public bob = address(0x2);
     address public charlie = address(0x3);
     address public david = address(0x4);
     address public eve = address(0x5);
-    
+
     // Events for testing
     event Minted(address indexed user, uint256 ethAmount, uint256 userTokens, uint256 feeTokens);
     event Redeemed(address indexed user, uint256 tokenAmount, uint256 ethAmount, uint256 fee);
@@ -22,10 +22,10 @@ abstract contract EtheriumTestBase is Test {
     event PrevrandaoRevealed(address indexed user, uint256 prevrandao, uint256 day);
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event AuctionWon(address indexed winner, uint256 etheriumAmount, uint256 ethPaid, uint256 day);
-    
+
     function setUp() public virtual {
         etherium = new Etherium();
-        
+
         // Fund test accounts
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -33,25 +33,25 @@ abstract contract EtheriumTestBase is Test {
         vm.deal(david, 100 ether);
         vm.deal(eve, 100 ether);
     }
-    
+
     // Helper function to move time forward by days
     function skipDays(uint256 numDays) internal {
         vm.warp(block.timestamp + numDays * 25 hours);
     }
-    
+
     // Helper function to move to next day and past the 1-minute mark
     function moveToNextDay() internal {
         vm.warp(block.timestamp + 25 hours + 61);
     }
-    
+
     // Helper function to set up basic holders
     function setupBasicHolders() internal {
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-        
+
         vm.prank(bob);
         etherium.mint{value: 5 ether}();
-        
+
         vm.prank(charlie);
         etherium.mint{value: 2 ether}();
     }
@@ -62,15 +62,15 @@ contract MockContract {
     function mintEtherium(Etherium etherium) external {
         etherium.mint{value: 1 ether}();
     }
-    
+
     function transferEtherium(Etherium etherium, address to, uint256 amount) external {
         etherium.transfer(to, amount);
     }
-    
+
     function approveEtherium(Etherium etherium, address spender, uint256 amount) external {
         etherium.approve(spender, amount);
     }
-    
+
     function transferFromEtherium(Etherium etherium, address from, address to, uint256 amount) external {
         etherium.transferFrom(from, to, amount);
     }
@@ -80,7 +80,7 @@ contract MockContract {
 
 // Contract that rejects ETH transfers
 contract MockRejectETH {
-    // No receive or fallback function - will reject ETH transfers
+// No receive or fallback function - will reject ETH transfers
 }
 
 // Attack contract for reentrancy tests
@@ -118,16 +118,9 @@ contract MockERC20 {
         balanceOf[to] += amount;
     }
 
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
