@@ -28,13 +28,12 @@ contract EtheriumDonationTest is Test {
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
         
-        uint256 aliceBalance = etherium.balanceOf(alice);
         uint256 totalSupplyBefore = etherium.totalSupply();
         uint256 contractBalanceBefore = address(etherium).balance;
         
         // Calculate redemption value before donation
         uint256 redeemAmount = 1000 ether; // 1000 ETHERIUM
-        uint256 fee = (redeemAmount * 100) / 10000;
+        uint256 fee = redeemAmount / 100;
         uint256 netAmount = redeemAmount - fee;
         uint256 redemptionValueBefore = (netAmount * contractBalanceBefore) / totalSupplyBefore;
         
@@ -173,7 +172,6 @@ contract EtheriumDonationTest is Test {
         
         // Alice redeems half her tokens
         uint256 redeemAmount = aliceTokens / 2;
-        uint256 contractBalanceBefore = address(etherium).balance;
         uint256 aliceEthBefore = alice.balance;
         
         vm.prank(alice);

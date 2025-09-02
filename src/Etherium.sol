@@ -419,13 +419,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             return;
         }
 
-        // For minting and burning, use atomic update directly
+        // For minting and burning, use atomic update directly (no lottery trigger needed)
         if (from == address(0) || to == address(0)) {
             _atomicUpdate(from, to, value);
             return;
         }
 
         // Try to execute pending lottery/auction before transfers
+        // This ensures Fenwick tree consistency and proper snapshot usage
         _tryExecuteLotteryAndAuction();
 
         // Apply fees for transfers
