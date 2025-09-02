@@ -157,9 +157,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
     Auction public currentAuction;
 
-    // Track fees collected per day for next day's lottery/auction
-    mapping(uint256 day => uint256 fees) public dailyFeesCollected;
-
     constructor() ERC20("Etherium", "ETHERIUM") {
         deploymentTime = block.timestamp;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
@@ -244,7 +241,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         _mint(msg.sender, netEtherium);
         if (fee > 0) {
             _mint(FEES_POOL, fee);
-            dailyFeesCollected[getCurrentDay()] += fee;
         }
 
         // No need for manual Fenwick update - handled atomically in _update
@@ -361,7 +357,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Transfer fees atomically (Fenwick tree updated automatically)
         if (fee > 0) {
             _atomicUpdate(msg.sender, FEES_POOL, fee);
-            dailyFeesCollected[getCurrentDay()] += fee;
         }
 
         // Burn the remainder from user atomically (Fenwick tree updated automatically)
@@ -413,8 +408,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         address to,
         uint256 value
     ) internal override {
-        // Redirect external transfers to this contract to FEES_POOL
-        if (to == address(this)) {
+        // Redirect external transfers to this contract or LOT_POOL to FEES_POOL
+        // This maintains the invariant: LOT_POOL balance == auction amount + unclaimed prizes
+        if (to == address(this) || to == LOT_POOL) {
             _atomicUpdate(from, FEES_POOL, value);
             return;
         }
@@ -449,7 +445,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // Transfer fees to fees pool atomically
         if (fee > 0) {
             _atomicUpdate(from, FEES_POOL, fee);
-            dailyFeesCollected[getCurrentDay()] += fee;
         }
     }
 
@@ -698,8 +693,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 timeIntoDay = (block.timestamp - deploymentTime) % 25 hours;
         if (timeIntoDay < TIME_GAP) return;
 
-        // Get fees from previous day (day before current)
-        uint256 feesToDistribute = dailyFeesCollected[currentDay - 1];
+        // Get all accumulated fees from FEES_POOL
+        uint256 feesToDistribute = balanceOf(FEES_POOL);
 
         // Skip lottery/auction for dust amounts
         // This ensures both lottery and auction get meaningful amounts when split
@@ -809,8 +804,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             "Must wait 1 minute into new day before executing"
         );
 
-        // Get fees from previous day
-        uint256 feesToDistribute = dailyFeesCollected[currentDay - 1];
+        // Get all accumulated fees from FEES_POOL
+        uint256 feesToDistribute = balanceOf(FEES_POOL);
         require(
             feesToDistribute >= MIN_FEES_FOR_DISTRIBUTION,
             "Insufficient fees to distribute"
@@ -1031,15 +1026,12 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // If no bids, roll over the fees to the next day
         if (currentAuction.currentBidder == address(0)) {
             if (currentAuction.etheriumAmount > 0) {
-                // Add unclaimed auction amount back to fees pool for next day
+                // Add unclaimed auction amount back to fees pool for next distribution
                 _atomicUpdate(
                     LOT_POOL,
                     FEES_POOL,
                     currentAuction.etheriumAmount
                 );
-                // Track it for the next day's distribution
-                dailyFeesCollected[getCurrentDay()] += currentAuction
-                    .etheriumAmount;
             }
             return;
         }
