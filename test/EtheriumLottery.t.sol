@@ -7,18 +7,29 @@ import {console} from "forge-std/Test.sol";
 contract EtheriumLotteryTest is EtheriumTestBase {
     function testPrevrandaoLottery() public {
         // Alice and Bob mint during initial period
+        vm.expectEmit(true, false, false, true);
+        emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
+        assertEq(etherium.balanceOf(alice), 9900 ether, "Alice should have 9900 ETHERIUM");
 
+        vm.expectEmit(true, false, false, true);
+        emit Minted(bob, 5 ether, 4950 ether, 50 ether);
         vm.prank(bob);
         etherium.mint{value: 5 ether}();
+        assertEq(etherium.balanceOf(bob), 4950 ether, "Bob should have 4950 ETHERIUM");
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees via transfer on day 8
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
+        uint256 bobBalanceBefore = etherium.balanceOf(bob);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        bool success = etherium.transfer(bob, 1000 ether);
+        assertTrue(success, "Transfer should succeed");
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
+        assertEq(etherium.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 (1000 - 10 fee)");
 
         // Move to day 9 to execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -27,6 +38,11 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         vm.prevrandao(bytes32(uint256(123456)));
 
         // Execute lottery
+        // We're executing on day 9 for day 8's fees
+        // Day 8 is even and after minting period, so fees split 50/50
+        // Transfer fee was 10 ETHERIUM, so 5 to lottery, 5 to auction
+        vm.expectEmit(false, false, false, false);
+        emit LotteryWon(address(0), 0, 0); // Don't know exact winner due to randomness
         etherium.executeLottery();
 
         // Verify lottery was executed for the correct day
@@ -35,7 +51,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Should have a winner with correct amount
         assertTrue(winner == alice || winner == bob, "Winner should be alice or bob");
-        assertGt(amount, 0, "Prize amount should be greater than 0");
+        assertEq(amount, 5 ether, "Prize amount should be 5 ETHERIUM (50% of 10 fee)");
     }
 
     function testLotteryWithMultipleHolders() public {
@@ -46,10 +62,15 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        bool success1 = etherium.transfer(bob, 100 ether);
+        assertTrue(success1, "Transfer should succeed");
+        // Fee: 1 ETHERIUM
 
         vm.prank(bob);
-        etherium.transfer(charlie, 100 ether);
+        bool success2 = etherium.transfer(charlie, 100 ether);
+        assertTrue(success2, "Transfer should succeed");
+        // Fee: 1 ETHERIUM
+        // Total transfer fees: 2 ETHERIUM
 
         // Move to day 9 and execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);

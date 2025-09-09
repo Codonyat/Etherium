@@ -40,8 +40,12 @@ contract EtheriumAuctionTest is WETHTestBase {
         vm.warp(block.timestamp + 8 days + 1 hours);
 
         // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        bool success = etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        assertTrue(success, "Transfer should succeed");
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
+        assertEq(etherium.balanceOf(bob), 990 ether, "Bob should receive 990 (1000 - 10 fee)");
 
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
@@ -78,8 +82,12 @@ contract EtheriumAuctionTest is WETHTestBase {
         vm.warp(block.timestamp + 8 days + 1 hours);
 
         // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        bool success = etherium.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        assertTrue(success, "Transfer should succeed");
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
+        assertEq(etherium.balanceOf(bob), 990 ether, "Bob should receive 990 (1000 - 10 fee)");
 
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);

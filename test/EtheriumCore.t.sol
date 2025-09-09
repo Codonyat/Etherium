@@ -7,22 +7,28 @@ import {console} from "forge-std/Test.sol";
 contract EtheriumCoreTest is EtheriumTestBase {
     function testTransferWithFee() public {
         // Alice mints tokens
+        vm.expectEmit(true, false, false, true);
+        emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
-
+        
+        // Verify initial balances
         uint256 aliceInitial = etherium.balanceOf(alice);
+        assertEq(aliceInitial, 9900 ether, "Alice should have 9900 ETHERIUM after minting");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 100 ether, "Fees pool should have 100 ETHERIUM from mint");
+
         uint256 transferAmount = 1000 ether;
         uint256 expectedFee = 10 ether; // 1% fee
         uint256 expectedReceived = transferAmount - expectedFee;
 
-        // Don't check event as the contract may emit multiple Transfer events
+        // Transfer with fee verification
         vm.prank(alice);
         bool success = etherium.transfer(bob, transferAmount);
         assertTrue(success, "Transfer should succeed");
 
-        assertEq(etherium.balanceOf(alice), aliceInitial - transferAmount);
-        assertEq(etherium.balanceOf(bob), expectedReceived);
-        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 100 ether + expectedFee); // Initial mint fee + transfer fee
+        assertEq(etherium.balanceOf(alice), aliceInitial - transferAmount, "Alice balance should decrease by transfer amount");
+        assertEq(etherium.balanceOf(bob), expectedReceived, "Bob should receive amount minus fee");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 100 ether + expectedFee, "Fees pool should increase by transfer fee");
     }
 
     function testRejectDirectETHTransfer() public {
@@ -63,8 +69,13 @@ contract EtheriumCoreTest is EtheriumTestBase {
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
+        uint256 bobBalanceBefore = etherium.balanceOf(bob);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        bool success = etherium.transfer(bob, 1000 ether);
+        assertTrue(success, "Transfer should succeed");
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
+        assertEq(etherium.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 (1000 - 10 fee)");
 
         // Execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
@@ -94,8 +105,13 @@ contract EtheriumCoreTest is EtheriumTestBase {
 
         // Day 9: Generate fees (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
+        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
+        uint256 bobBalanceBefore = etherium.balanceOf(bob);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        bool success = etherium.transfer(bob, 1000 ether);
+        assertTrue(success, "Transfer should succeed");
+        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease");
+        assertEq(etherium.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 after fee");
 
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
