@@ -579,11 +579,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         uint256 balanceAfter
     ) internal {
         if (account == address(0)) return; // Skip zero address (minting/burning)
-        if (account.code.length > 0) return; // Skip contracts
         if (account == LOT_POOL || account == FEES_POOL) return; // Skip synthetic addresses
-
+        
         uint32 currentDay = uint32(getCurrentDay());
         uint256 currentIndex = indexByHolder[account].latestValue;
+        
+        // For contracts: only skip if they're not already in the tree
+        // This prevents corruption from constructor bypass or CREATE2 pre-funding
+        if (account.code.length > 0 && currentIndex == 0) return;
 
         int256 balanceChange = int256(balanceAfter) - int256(balanceBefore);
 
