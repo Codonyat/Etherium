@@ -72,7 +72,7 @@ contract EtheriumCoreTest is EtheriumTestBase {
         etherium.executeLottery();
 
         // Get winner
-        (address winner, uint112 prizeAmount) = etherium.unclaimedPrizes(8);
+        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(8 % 7);
 
         // Fast forward 14 days to trigger unclaimed prize distribution
         for (uint256 i = 0; i < 14; i++) {
@@ -102,7 +102,7 @@ contract EtheriumCoreTest is EtheriumTestBase {
         vm.prevrandao(bytes32(uint256(111)));
         etherium.executeLottery();
 
-        (address winner1, uint112 amount1) = etherium.unclaimedPrizes(9);
+        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(9 % 7);
 
         // Generate fees for multiple days to potentially overwrite slots
         for (uint256 i = 0; i < 14; i++) {
@@ -142,7 +142,7 @@ contract EtheriumCoreTest is EtheriumTestBase {
         vm.prevrandao(bytes32(uint256(999)));
         etherium.executeLottery();
 
-        (address winner, uint112 prizeAmount) = etherium.unclaimedPrizes(9);
+        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(9 % 7);
 
         if (winner != address(0)) {
             // Wait 14 days and execute lotteries to trigger unclaimed distribution
@@ -216,7 +216,7 @@ contract EtheriumCoreTest is EtheriumTestBase {
 
         // Check for lottery or auction execution
         // Day 9 could be lottery or auction depending on implementation
-        (address winner,) = etherium.unclaimedPrizes(9);
+        (address winner,) = etherium.lotteryUnclaimedPrizes(9 % 7);
         (address bidder,,, uint112 auctionAmount,) = etherium.currentAuction();
 
         // Should have either lottery winner or auction

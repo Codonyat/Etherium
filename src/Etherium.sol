@@ -50,16 +50,18 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     uint256 public constant TIME_GAP = 1 minutes; // Must be 1 minute into new day before lottery can execute
     uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 ETHERIUM) to run lottery/auction
 
-    // Cyclical array for unclaimed prizes (14 slots)
-    // We need 14 slots because after minting period we alternate lottery/auction daily
-    // This ensures a full week of unclaimed prizes for both types
+    // Cyclical arrays for unclaimed prizes (7 slots each)
+    // Separate arrays for lottery and auction to prevent slot conflicts
+    // We need 7 slots to ensure a full week of unclaimed prizes for each type
+    // Since lottery and auction alternate daily after minting period, 7 slots is sufficient
     // Packed struct: 160 + 112 = 272 bits (exceeds 256, uses 2 slots per prize)
     struct UnclaimedPrize {
         address winner; // 160 bits
         uint112 amount; // 112 bits (ETHERIUM amount for prizes)
     }
 
-    UnclaimedPrize[14] public unclaimedPrizes;
+    UnclaimedPrize[7] public lotteryUnclaimedPrizes;
+    UnclaimedPrize[7] public auctionUnclaimedPrizes;
 
     // Public goods recipients (hardcoded)
     address[5] public PUBLIC_GOODS = [
@@ -618,13 +620,13 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             address winner = _selectWinnerEfficient(snapshotDay, randomSeed);
 
             uint256 lotteryDay = currentDay - 1; // The day whose fees we're distributing
-            uint256 slot = lotteryDay % 14; // Use 14 slots to handle lottery/auction alternation
+            uint256 slot = lotteryDay % 7; // Use 7 slots for lottery prizes
 
             // Transfer prize from fees pool to lottery pool for holding
             _atomicUpdate(FEES_POOL, LOT_POOL, feesToDistribute);
 
-            // Check if this slot has an unclaimed prize
-            UnclaimedPrize storage prize = unclaimedPrizes[slot];
+            // Check if this slot has an unclaimed lottery prize
+            UnclaimedPrize storage prize = lotteryUnclaimedPrizes[slot];
             if (prize.amount > 0) {
                 // Try to redeem ETHERIUM for ETH and send to public good
                 address publicGood = PUBLIC_GOODS[currentPublicGoodIndex];
@@ -693,15 +695,28 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     function claim() external nonReentrant {
         uint256 totalClaimed = 0;
 
-        // Check all 7 slots for prizes belonging to caller
-        for (uint256 i = 0; i < 14; i++) {
-            if (unclaimedPrizes[i].winner == msg.sender && unclaimedPrizes[i].amount > 0) {
-                uint256 prizeAmount = unclaimedPrizes[i].amount;
+        // Check all 7 slots for both lottery and auction prizes in a single loop
+        for (uint256 i = 0; i < 7; i++) {
+            // Check lottery prizes
+            if (lotteryUnclaimedPrizes[i].winner == msg.sender && lotteryUnclaimedPrizes[i].amount > 0) {
+                uint256 prizeAmount = lotteryUnclaimedPrizes[i].amount;
                 totalClaimed += prizeAmount;
 
                 // Clear the slot
-                unclaimedPrizes[i].winner = address(0);
-                unclaimedPrizes[i].amount = 0;
+                lotteryUnclaimedPrizes[i].winner = address(0);
+                lotteryUnclaimedPrizes[i].amount = 0;
+
+                emit PrizeClaimed(msg.sender, prizeAmount);
+            }
+            
+            // Check auction prizes
+            if (auctionUnclaimedPrizes[i].winner == msg.sender && auctionUnclaimedPrizes[i].amount > 0) {
+                uint256 prizeAmount = auctionUnclaimedPrizes[i].amount;
+                totalClaimed += prizeAmount;
+
+                // Clear the slot
+                auctionUnclaimedPrizes[i].winner = address(0);
+                auctionUnclaimedPrizes[i].amount = 0;
 
                 emit PrizeClaimed(msg.sender, prizeAmount);
             }
@@ -805,20 +820,31 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * @dev Get claimable amount for the caller
      */
     function getMyClaimableAmount() external view returns (uint256 total) {
-        for (uint256 i = 0; i < 14; i++) {
-            if (unclaimedPrizes[i].winner == msg.sender) {
-                total += unclaimedPrizes[i].amount;
+        // Check both lottery and auction prizes in a single loop
+        for (uint256 i = 0; i < 7; i++) {
+            if (lotteryUnclaimedPrizes[i].winner == msg.sender) {
+                total += lotteryUnclaimedPrizes[i].amount;
+            }
+            if (auctionUnclaimedPrizes[i].winner == msg.sender) {
+                total += auctionUnclaimedPrizes[i].amount;
             }
         }
     }
 
     /**
-     * @dev Get all unclaimed prizes
+     * @dev Get all unclaimed prizes (both lottery and auction)
      */
-    function getAllUnclaimedPrizes() external view returns (address[14] memory winners, uint112[14] memory amounts) {
-        for (uint256 i = 0; i < 14; i++) {
-            winners[i] = unclaimedPrizes[i].winner;
-            amounts[i] = unclaimedPrizes[i].amount;
+    function getAllUnclaimedPrizes() external view returns (
+        address[7] memory lotteryWinners, 
+        uint112[7] memory lotteryAmounts,
+        address[7] memory auctionWinners,
+        uint112[7] memory auctionAmounts
+    ) {
+        for (uint256 i = 0; i < 7; i++) {
+            lotteryWinners[i] = lotteryUnclaimedPrizes[i].winner;
+            lotteryAmounts[i] = lotteryUnclaimedPrizes[i].amount;
+            auctionWinners[i] = auctionUnclaimedPrizes[i].winner;
+            auctionAmounts[i] = auctionUnclaimedPrizes[i].amount;
         }
     }
 
@@ -874,10 +900,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         // This is safe because we control when this happens (no external call that could revert)
         WETH.withdraw(currentAuction.currentBid);
 
-        uint256 slot = currentAuction.auctionDay % 14;
+        uint256 slot = currentAuction.auctionDay % 7; // Use 7 slots for auction prizes
 
-        // Check if this slot has an unclaimed prize
-        UnclaimedPrize storage prize = unclaimedPrizes[slot];
+        // Check if this slot has an unclaimed auction prize
+        UnclaimedPrize storage prize = auctionUnclaimedPrizes[slot];
         if (prize.amount > 0) {
             // Try to send to public good
             address publicGood = PUBLIC_GOODS[currentPublicGoodIndex];

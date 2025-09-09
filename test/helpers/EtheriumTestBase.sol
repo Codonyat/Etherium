@@ -22,6 +22,7 @@ abstract contract EtheriumTestBase is Test {
     event PrevrandaoRevealed(address indexed user, uint256 prevrandao, uint256 day);
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event AuctionWon(address indexed winner, uint256 etheriumAmount, uint256 ethPaid, uint256 day);
+    event PublicGoodsFunded(address indexed publicGood, uint256 amount, address originalWinner);
 
     function setUp() public virtual {
         etherium = new Etherium();

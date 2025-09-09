@@ -31,7 +31,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Verify lottery was executed for the correct day
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner, uint112 amount) = etherium.unclaimedPrizes(currentDay - 1);
+        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         // Should have a winner with correct amount
         assertTrue(winner == alice || winner == bob, "Winner should be alice or bob");
@@ -61,7 +61,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Check that we have a winner
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner, uint112 amount) = etherium.unclaimedPrizes(currentDay - 1);
+        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         assertTrue(winner == alice || winner == bob || winner == charlie, "Winner should be one of the holders");
         assertGt(amount, 0, "Winner should have prize amount");
@@ -114,9 +114,9 @@ contract EtheriumLotteryTest is EtheriumTestBase {
             uint256 currentDay = etherium.getCurrentDay();
 
             // Check if there's a winner for the previous day
-            // unclaimedPrizes is a 14-slot array, use modulo to avoid out of bounds
-            uint256 prizeDay = (currentDay - 1) % 14;
-            (address winner,) = etherium.unclaimedPrizes(prizeDay);
+            // unclaimedPrizes is a 7-slot array, use modulo to avoid out of bounds
+            uint256 prizeDay = (currentDay - 1) % 7;
+            (address winner,) = etherium.lotteryUnclaimedPrizes(prizeDay);
 
             if (winner == alice) aliceWins++;
             else if (winner == bob) bobWins++;
@@ -155,8 +155,8 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Day 8 is even (auction), day 9 is odd (lottery)
         // Check for the appropriate day based on what was executed
-        (address winner8,) = etherium.unclaimedPrizes(8);
-        (address winner9,) = etherium.unclaimedPrizes(9);
+        (address winner8,) = etherium.lotteryUnclaimedPrizes(8 % 7);
+        (address winner9,) = etherium.lotteryUnclaimedPrizes(9 % 7);
 
         // Check for lottery or auction execution
         (,,, uint112 auctionAmount,) = etherium.currentAuction();
@@ -186,7 +186,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Get the winner
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner1,) = etherium.unclaimedPrizes(currentDay - 1);
+        (address winner1,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         // Now move to next day and generate more fees
         vm.prank(bob);
@@ -230,7 +230,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Verify lottery executed correctly
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner,) = etherium.unclaimedPrizes(currentDay - 1);
+        (address winner,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         assertTrue(winner != address(0), "Should have lottery winner");
     }
@@ -250,7 +250,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         etherium.executeLottery();
 
         uint256 day1 = etherium.getCurrentDay() - 1;
-        (address winner1, uint112 amount1) = etherium.unclaimedPrizes(day1);
+        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(day1 % 7);
 
         // Second lottery cycle
         vm.prank(bob);
@@ -261,7 +261,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         etherium.executeLottery();
 
         uint256 day2 = etherium.getCurrentDay() - 1;
-        (address winner2, uint112 amount2) = etherium.unclaimedPrizes(day2);
+        (address winner2, uint112 amount2) = etherium.lotteryUnclaimedPrizes(day2 % 7);
 
         // Both lotteries should have winners
         assertTrue(winner1 != address(0), "First lottery should have winner");
@@ -292,7 +292,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         etherium.executeLottery();
 
         // Check that day 0 fees were distributed
-        (address winner, uint112 amount) = etherium.unclaimedPrizes(0);
+        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
         // Day 0 fees: 151 tokens total, all go to lottery during minting period
@@ -319,7 +319,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Check multiple days as lottery/auction alternate
         bool hasWinner = false;
         for (uint256 day = 8; day <= 13; day++) {
-            (address winner,) = etherium.unclaimedPrizes(day);
+            (address winner,) = etherium.lotteryUnclaimedPrizes(day % 7);
             if (winner != address(0)) {
                 hasWinner = true;
                 break;
@@ -358,7 +358,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Check last few slots (remember it's a 14-slot circular buffer)
         for (uint256 i = 0; i < 3; i++) {
             uint256 checkDay = ((currentDay - 1 - i) % 14);
-            (address winner,) = etherium.unclaimedPrizes(checkDay);
+            (address winner,) = etherium.lotteryUnclaimedPrizes(checkDay);
             if (winner != address(0)) {
                 // This might be an old winner from before day 20
                 // Can't definitively test this without more complex state tracking
@@ -423,7 +423,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         etherium.executeLottery();
 
         // Get winner info for day 9
-        (address winner, uint112 amount) = etherium.unclaimedPrizes(9);
+        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes(9 % 7);
 
         if (winner != address(0)) {
             // Winner claims prize
@@ -438,7 +438,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
             assertEq(winnerBalanceAfter - winnerBalanceBefore, amount, "Winner should receive prize amount");
 
             // Verify prize is marked as claimed
-            (address winnerAfterClaim, uint112 amountAfterClaim) = etherium.unclaimedPrizes(9);
+            (address winnerAfterClaim, uint112 amountAfterClaim) = etherium.lotteryUnclaimedPrizes(9 % 7);
             assertEq(winnerAfterClaim, address(0), "Prize should be marked as claimed");
             assertEq(amountAfterClaim, 0, "Prize amount should be zero after claim");
         } else {
@@ -506,7 +506,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         etherium.executeLottery();
 
         // Verify lottery or auction executed
-        (address winner, uint112 prizeAmount) = etherium.unclaimedPrizes(9);
+        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(9 % 7);
         (address bidder,,, uint112 auctionAmount,) = etherium.currentAuction();
 
         // Should have either lottery or auction

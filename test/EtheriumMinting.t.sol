@@ -242,7 +242,7 @@ contract EtheriumMintingTest is EtheriumTestBase {
 
         // Check that only Alice (EOA) could win, not the contracts
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner,) = etherium.unclaimedPrizes(currentDay - 1);
+        (address winner,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
         if (winner != address(0)) {
             // If there's a winner, it must be Alice (the only EOA holder)
             assertEq(winner, alice, "Winner must be Alice, the only EOA holder");

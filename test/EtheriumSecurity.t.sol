@@ -224,10 +224,10 @@ contract EtheriumSecurityTest is Test {
         etherium.executeLottery();
 
         // Now check for a winner - try both slots
-        (address winner1, uint112 amount1) = etherium.unclaimedPrizes(9);
+        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(9 % 7);
         if (winner1 == address(0)) {
             // Try slot 8 if 9 is empty
-            (winner1, amount1) = etherium.unclaimedPrizes(8);
+            (winner1, amount1) = etherium.lotteryUnclaimedPrizes(8 % 7);
         }
         assertTrue(winner1 != address(0), "Should have winner");
         assertTrue(amount1 > 0, "Should have prize amount");

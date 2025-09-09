@@ -9,4 +9,5 @@ remappings = [
 ]
 solc_version = "0.8.28"
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+[rpc_endpoints]
+mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
