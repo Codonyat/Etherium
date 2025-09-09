@@ -25,77 +25,120 @@ contract EtheriumDonationTest is Test {
 
     function testDonationIncreasesRedemptionValue() public {
         // Alice mints first
+        uint256 mintAmount = 10 ether;
+        uint256 expectedTokens = mintAmount * 990; // 9,900 tokens after 1% fee
+        uint256 expectedFee = mintAmount * 10; // 100 tokens fee
+        
+        vm.expectEmit(true, true, true, true);
+        emit Minted(alice, mintAmount, expectedTokens, expectedFee);
+        
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        etherium.mint{value: mintAmount}();
+        
+        assertEq(etherium.balanceOf(alice), expectedTokens, "Alice should receive 9,900 tokens");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), expectedFee, "Fees pool should have 100 tokens");
 
         uint256 totalSupplyBefore = etherium.totalSupply();
         uint256 contractBalanceBefore = address(etherium).balance;
+        assertEq(totalSupplyBefore, 10000 ether, "Total supply should be 10,000 tokens");
+        assertEq(contractBalanceBefore, mintAmount, "Contract should hold 10 ETH");
 
         // Calculate redemption value before donation
         uint256 redeemAmount = 1000 ether; // 1000 ETHERIUM
-        uint256 fee = redeemAmount / 100;
-        uint256 netAmount = redeemAmount - fee;
+        uint256 fee = redeemAmount / 100; // 10 ETHERIUM fee
+        uint256 netAmount = redeemAmount - fee; // 990 ETHERIUM
         uint256 redemptionValueBefore = (netAmount * contractBalanceBefore) / totalSupplyBefore;
+        assertEq(redemptionValueBefore, 0.99 ether, "Redemption value before should be 0.99 ETH");
 
         // Donor sends 5 ETH to the contract
+        uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success,) = address(etherium).call{value: 5 ether}("");
+        (bool success,) = address(etherium).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
 
         // Check contract balance increased
-        assertEq(address(etherium).balance, contractBalanceBefore + 5 ether);
+        assertEq(address(etherium).balance, contractBalanceBefore + donationAmount, "Contract balance should increase by 5 ETH");
 
         // Check total supply unchanged
-        assertEq(etherium.totalSupply(), totalSupplyBefore);
+        assertEq(etherium.totalSupply(), totalSupplyBefore, "Total supply should remain 10,000 tokens");
 
         // Calculate redemption value after donation
         uint256 redemptionValueAfter = (netAmount * address(etherium).balance) / etherium.totalSupply();
+        assertEq(redemptionValueAfter, 1.485 ether, "Redemption value after should be 1.485 ETH");
 
-        // Redemption value should increase
-        assertTrue(redemptionValueAfter > redemptionValueBefore, "Redemption value should increase");
+        // Redemption value should increase by 50%
+        assertEq(redemptionValueAfter - redemptionValueBefore, 0.495 ether, "Redemption value should increase by 0.495 ETH");
     }
 
     function testDonationDoesntAffectMinting() public {
         // Initial mint
+        vm.expectEmit(true, true, true, true);
+        emit Minted(alice, 1 ether, 990 ether, 10 ether);
+        
         vm.prank(alice);
         etherium.mint{value: 1 ether}();
+        assertEq(etherium.balanceOf(alice), 990 ether, "Alice should get 990 tokens");
 
         // Donate ETH
+        uint256 donationAmount = 10 ether;
         vm.prank(donor);
-        (bool success,) = address(etherium).call{value: 10 ether}("");
-        assertTrue(success);
+        (bool success,) = address(etherium).call{value: donationAmount}("");
+        assertTrue(success, "Donation should succeed");
+        assertEq(address(etherium).balance, 11 ether, "Contract should have 11 ETH");
 
         // Bob mints after donation
+        vm.expectEmit(true, true, true, true);
+        emit Minted(bob, 1 ether, 990 ether, 10 ether);
+        
         vm.prank(bob);
         etherium.mint{value: 1 ether}();
 
         // Bob should still get the standard amount (990 ETHERIUM after 1% fee)
-        assertEq(etherium.balanceOf(bob), 990 ether);
+        assertEq(etherium.balanceOf(bob), 990 ether, "Bob should get 990 tokens despite donation");
+        assertEq(address(etherium).balance, 12 ether, "Contract should have 12 ETH");
     }
 
     function testDonationDoesntBreakLottery() public {
         // Setup holders
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
+        assertEq(etherium.balanceOf(alice), 9900 ether, "Alice should have 9,900 tokens");
 
         vm.prank(bob);
         etherium.mint{value: 10 ether}();
+        assertEq(etherium.balanceOf(bob), 9900 ether, "Bob should have 9,900 tokens");
 
         // Generate fees on day 0
+        uint256 transferAmount = 1000 ether;
+        
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(alice, bob, 990 ether); // Bob receives 990 after fee
+        
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        etherium.transfer(bob, transferAmount);
+        assertEq(etherium.balanceOf(alice), 8900 ether, "Alice should have 8,900 tokens");
+        assertEq(etherium.balanceOf(bob), 10890 ether, "Bob should have 10,890 tokens");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 210 ether, "Fees pool should have 210 tokens");
 
         // Donate ETH
+        uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success,) = address(etherium).call{value: 5 ether}("");
-        assertTrue(success);
+        (bool success,) = address(etherium).call{value: donationAmount}("");
+        assertTrue(success, "Donation should succeed");
+        assertEq(address(etherium).balance, 25 ether, "Contract should have 25 ETH");
 
         // Move to day 1
         vm.warp(block.timestamp + 25 hours);
 
         // Generate fees on day 1
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(bob, alice, 990 ether);
+        
         vm.prank(bob);
-        etherium.transfer(alice, 1000 ether);
+        etherium.transfer(alice, transferAmount);
+        assertEq(etherium.balanceOf(bob), 9890 ether, "Bob should have 9,890 tokens");
+        assertEq(etherium.balanceOf(alice), 9890 ether, "Alice should have 9,890 tokens");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 220 ether, "Fees pool should have 220 tokens");
 
         // Move to day 2 and execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
@@ -104,7 +147,7 @@ contract EtheriumDonationTest is Test {
         etherium.executeLottery();
 
         // Check lottery executed
-        assertEq(etherium.lastLotteryDay(), 2);
+        assertEq(etherium.lastLotteryDay(), 2, "Lottery should be executed for day 2");
     }
 
     function testMultipleDonations() public {
@@ -160,28 +203,44 @@ contract EtheriumDonationTest is Test {
 
     function testRedemptionWithDonation() public {
         // Alice mints
+        uint256 mintAmount = 10 ether;
+        vm.expectEmit(true, true, true, true);
+        emit Minted(alice, mintAmount, 9900 ether, 100 ether);
+        
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        etherium.mint{value: mintAmount}();
 
         uint256 aliceTokens = etherium.balanceOf(alice);
+        assertEq(aliceTokens, 9900 ether, "Alice should have 9,900 tokens");
 
         // Donate 5 ETH
+        uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success,) = address(etherium).call{value: 5 ether}("");
-        assertTrue(success);
+        (bool success,) = address(etherium).call{value: donationAmount}("");
+        assertTrue(success, "Donation should succeed");
+        assertEq(address(etherium).balance, 15 ether, "Contract should have 15 ETH");
 
         // Alice redeems half her tokens
-        uint256 redeemAmount = aliceTokens / 2;
+        uint256 redeemAmount = aliceTokens / 2; // 4,950 tokens
+        uint256 redeemFee = redeemAmount / 100; // 49.5 tokens fee
+        uint256 netRedeemed = redeemAmount - redeemFee; // 4,900.5 tokens
+        uint256 expectedEth = (netRedeemed * 15 ether) / etherium.totalSupply(); // (4900.5 * 15) / 10000 = 7.35075 ETH
+        
         uint256 aliceEthBefore = alice.balance;
 
+        vm.expectEmit(true, true, true, true);
+        emit Redeemed(alice, redeemAmount, expectedEth, redeemFee);
+        
         vm.prank(alice);
         etherium.redeem(redeemAmount);
 
         uint256 aliceEthAfter = alice.balance;
+        uint256 ethReceived = aliceEthAfter - aliceEthBefore;
 
         // Alice should have received more ETH due to donation
-        // She should get roughly (15 ETH * 0.5) = 7.5 ETH minus fees
-        assertTrue(aliceEthAfter - aliceEthBefore > 7 ether, "Should receive bonus from donation");
+        assertEq(ethReceived, expectedEth, "Alice should receive exact ETH amount");
+        assertTrue(ethReceived > 7.35 ether, "Should receive over 7.35 ETH due to donation");
+        assertEq(etherium.balanceOf(alice), 4950 ether, "Alice should have 4,950 tokens left");
     }
 
     function testFuzzDonations(uint256 donationAmount, uint8 numDonors) public {

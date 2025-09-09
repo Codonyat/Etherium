@@ -189,25 +189,51 @@ contract EtheriumCoreTest is EtheriumTestBase {
 
         // Generate significant fees
         vm.prank(alice);
-        etherium.transfer(bob, 5000 ether);
+        etherium.transfer(bob, 5000 ether); // 50 ETHERIUM fee
 
-        // Track public goods ETH before
-        address[2] memory publicGoods =
-            [address(0x4B8dF2b0452849e977c73E3D4e8d96be4Dfc3043), address(0x4b8e8a62B39EEb85054D175a5dDC81Bb903db78D)];
-
-        uint256[2] memory balancesBefore;
-        for (uint256 i = 0; i < 2; i++) {
-            balancesBefore[i] = publicGoods[i].balance;
-        }
-
-        // Execute lottery
+        // Execute lottery for day 8
         vm.warp(block.timestamp + 25 hours + 61);
         etherium.executeLottery();
 
-        // Check public goods received ETH
-        for (uint256 i = 0; i < 2; i++) {
-            uint256 balanceAfter = publicGoods[i].balance;
-            assertGe(balanceAfter, balancesBefore[i], "Public good should receive ETH");
+        // Check if we got a lottery winner (day 8 is even, so should be 25 ETHERIUM to lottery)
+        (address winner1, uint112 prizeAmount1) = etherium.lotteryUnclaimedPrizes(8 % 7);
+        
+        if (winner1 != address(0)) {
+            // Track the first public good's balance
+            address firstPublicGood = etherium.PUBLIC_GOODS(0);
+            uint256 publicGoodBalanceBefore = firstPublicGood.balance;
+            
+            // Wait 7 days to trigger unclaimed prize distribution
+            for (uint256 i = 0; i < 7; i++) {
+                // Generate fees
+                vm.prank(alice);
+                etherium.transfer(bob, 100 ether);
+                
+                // Execute lottery
+                vm.warp(block.timestamp + 25 hours + 61);
+                etherium.executeLottery();
+            }
+            
+            // Now check if public good received the correct ETH amount
+            uint256 publicGoodBalanceAfter = firstPublicGood.balance;
+            
+            // Calculate expected ETH based on ETHERIUM to ETH conversion
+            uint256 contractBalance = address(etherium).balance;
+            uint256 totalSupply = etherium.totalSupply();
+            uint256 expectedETH = (prizeAmount1 * contractBalance) / totalSupply;
+            
+            console.log("Unclaimed ETHERIUM prize:", prizeAmount1);
+            console.log("Contract ETH balance:", contractBalance);
+            console.log("Total ETHERIUM supply:", totalSupply);
+            console.log("Expected ETH to public good:", expectedETH);
+            console.log("Actual ETH sent:", publicGoodBalanceAfter - publicGoodBalanceBefore);
+            
+            // This assertion should FAIL due to the bug
+            assertEq(
+                publicGoodBalanceAfter - publicGoodBalanceBefore,
+                expectedETH,
+                "Public good should receive ETH based on proper ETHERIUM/ETH conversion"
+            );
         }
     }
 

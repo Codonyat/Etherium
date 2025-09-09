@@ -12,6 +12,8 @@ contract EtheriumAtomicityTest is Test {
     address public charlie = address(0x3);
 
     event Transfer(address indexed from, address indexed to, uint256 value);
+    event Minted(address indexed to, uint256 ethAmount, uint256 etheriumAmount, uint256 fee);
+    event Redeemed(address indexed from, uint256 etheriumAmount, uint256 ethAmount, uint256 fee);
 
     function setUp() public {
         etherium = new Etherium();
@@ -22,61 +24,93 @@ contract EtheriumAtomicityTest is Test {
     }
 
     function testFenwickTreeAtomicityDuringTransfers() public {
-        // Setup: Create holders
+        // Setup: Create holders with exact amounts
+        vm.expectEmit(true, true, true, true);
+        emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
+        assertEq(etherium.balanceOf(alice), 9900 ether, "Alice should have 9,900 tokens");
 
+        vm.expectEmit(true, true, true, true);
+        emit Minted(bob, 5 ether, 4950 ether, 50 ether);
         vm.prank(bob);
         etherium.mint{value: 5 ether}();
+        assertEq(etherium.balanceOf(bob), 4950 ether, "Bob should have 4,950 tokens");
 
+        vm.expectEmit(true, true, true, true);
+        emit Minted(charlie, 3 ether, 2970 ether, 30 ether);
         vm.prank(charlie);
         etherium.mint{value: 3 ether}();
+        assertEq(etherium.balanceOf(charlie), 2970 ether, "Charlie should have 2,970 tokens");
 
         // Verify initial Fenwick tree state
         uint256 initialSuffix1 = etherium.getSuffixSum(1);
-        uint256 expectedInitialTotal = etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(charlie);
-        assertEq(initialSuffix1, expectedInitialTotal, "Initial Fenwick sum incorrect");
+        uint256 expectedInitialTotal = 9900 ether + 4950 ether + 2970 ether; // 17,820 tokens
+        assertEq(initialSuffix1, expectedInitialTotal, "Initial Fenwick sum should be 17,820 tokens");
 
         // Perform multiple transfers in same transaction
         vm.startPrank(alice);
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(alice, bob, 99 ether); // 100 - 1% fee = 99
         etherium.transfer(bob, 100 ether);
+        assertEq(etherium.balanceOf(alice), 9800 ether, "Alice should have 9,800 tokens after first transfer");
+        assertEq(etherium.balanceOf(bob), 5049 ether, "Bob should have 5,049 tokens");
+        
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(alice, charlie, 198 ether); // 200 - 1% fee = 198
         etherium.transfer(charlie, 200 ether);
+        assertEq(etherium.balanceOf(alice), 9600 ether, "Alice should have 9,600 tokens after second transfer");
+        assertEq(etherium.balanceOf(charlie), 3168 ether, "Charlie should have 3,168 tokens");
         vm.stopPrank();
 
         // Verify Fenwick tree is still consistent
         uint256 afterSuffix1 = etherium.getSuffixSum(1);
-        uint256 expectedAfterTotal = etherium.balanceOf(alice) + etherium.balanceOf(bob) + etherium.balanceOf(charlie);
-        assertEq(afterSuffix1, expectedAfterTotal, "Fenwick sum inconsistent after transfers");
+        uint256 expectedAfterTotal = 9600 ether + 5049 ether + 3168 ether; // 17,817 tokens (3 tokens to fees)
+        assertEq(afterSuffix1, expectedAfterTotal, "Fenwick sum should be 17,817 tokens after transfers");
     }
 
     function testFenwickTreeAtomicityDuringMintAndBurn() public {
         // Initial mint
+        vm.expectEmit(true, true, true, true);
+        emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         etherium.mint{value: 10 ether}();
+        assertEq(etherium.balanceOf(alice), 9900 ether, "Alice should have 9,900 tokens");
 
         // Check Fenwick consistency after mint
         uint256 suffix1AfterMint = etherium.getSuffixSum(1);
-        assertEq(suffix1AfterMint, etherium.balanceOf(alice), "Fenwick incorrect after mint");
+        assertEq(suffix1AfterMint, 9900 ether, "Fenwick should be 9,900 after mint");
 
         // Move past minting period to enable redemption
         vm.warp(block.timestamp + 8 days);
 
         // Trigger max supply setting
+        uint256 redeemAmount = 100 ether;
+        uint256 redeemFee = 1 ether; // 1% of 100
+        uint256 netRedeemed = 99 ether;
+        uint256 ethReturned = netRedeemed / 1000; // 0.099 ETH
+        
+        vm.expectEmit(true, true, true, true);
+        emit Redeemed(alice, redeemAmount, ethReturned, redeemFee);
         vm.prank(alice);
-        etherium.redeem(100 ether);
+        etherium.redeem(redeemAmount);
+        assertEq(etherium.balanceOf(alice), 9800 ether, "Alice should have 9,800 tokens after redeem");
 
         // Check Fenwick consistency after redemption
         uint256 suffix1AfterRedeem = etherium.getSuffixSum(1);
-        assertEq(suffix1AfterRedeem, etherium.balanceOf(alice), "Fenwick incorrect after redeem");
+        assertEq(suffix1AfterRedeem, 9800 ether, "Fenwick should be 9,800 after redeem");
 
         // Add another holder
+        vm.expectEmit(true, true, true, true);
+        emit Minted(bob, 0.09 ether, 89.1 ether, 0.9 ether);
         vm.prank(bob);
         etherium.mint{value: 0.09 ether}(); // Within capacity after redemption
+        assertEq(etherium.balanceOf(bob), 89.1 ether, "Bob should have 89.1 tokens");
 
         // Verify both holders are tracked correctly
         uint256 finalSuffix1 = etherium.getSuffixSum(1);
-        uint256 expectedFinal = etherium.balanceOf(alice) + etherium.balanceOf(bob);
-        assertEq(finalSuffix1, expectedFinal, "Fenwick incorrect with multiple holders");
+        uint256 expectedFinal = 9800 ether + 89.1 ether; // 9,889.1 tokens
+        assertEq(finalSuffix1, expectedFinal, "Fenwick should be 9,889.1 with both holders");
     }
 
     function testFenwickTreeAtomicityDuringComplexOperations() public {
@@ -136,8 +170,13 @@ contract EtheriumAtomicityTest is Test {
 
         // Try to transfer to malicious contract
         // The reentrancy guard should prevent any issues
+        uint256 transferAmount = 100 ether;
+        uint256 netTransferred = 99 ether;
+        
+        vm.expectEmit(true, true, true, true);
+        emit Transfer(alice, address(malicious), netTransferred);
         vm.prank(alice);
-        etherium.transfer(address(malicious), 100 ether);
+        etherium.transfer(address(malicious), transferAmount);
 
         // Verify Fenwick tree is still consistent
         // Note: Smart contracts are excluded from Fenwick tree (only EOAs are tracked)
@@ -149,9 +188,10 @@ contract EtheriumAtomicityTest is Test {
         // Only Alice's balance should be in the Fenwick tree
         assertEq(finalFenwick, aliceBalance, "Fenwick should only track Alice (EOA)");
 
-        // Verify the transfer happened correctly
-        assertEq(aliceBalance, 9800 ether, "Alice should have 9800 tokens");
-        assertEq(maliciousBalance, 99 ether, "Malicious contract should have 99 tokens");
+        // Verify the transfer happened correctly with exact amounts
+        assertEq(aliceBalance, 9800 ether, "Alice should have exactly 9,800 tokens");
+        assertEq(maliciousBalance, netTransferred, "Malicious contract should have exactly 99 tokens");
+        assertEq(etherium.balanceOf(etherium.FEES_POOL()), 101 ether, "Fees pool should have 101 tokens total");
     }
 
     function testFenwickTreeWithZeroBalanceTransitions() public {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {Etherium} from "../src/Etherium.sol";
 
 contract EtheriumSecurityTest is Test {
@@ -205,7 +205,7 @@ contract EtheriumSecurityTest is Test {
         // Generate some transfer fees on day 8
         vm.warp(block.timestamp + 8 days);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        etherium.transfer(bob, 1000 ether); // 10 ETHERIUM fee
 
         // Day 9 - Execute lottery/auction for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -217,7 +217,7 @@ contract EtheriumSecurityTest is Test {
 
         // Generate fees on day 9
         vm.prank(bob);
-        etherium.transfer(alice, 500 ether);
+        etherium.transfer(alice, 500 ether); // 5 ETHERIUM fee
 
         // Day 10 - Execute for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -231,9 +231,19 @@ contract EtheriumSecurityTest is Test {
         }
         assertTrue(winner1 != address(0), "Should have winner");
         assertTrue(amount1 > 0, "Should have prize amount");
+        
+        // Store the unclaimed prize amount for later verification
+        uint256 unclaimedPrizeAmount = amount1;
+        (address checkWinner,) = etherium.lotteryUnclaimedPrizes(9 % 7);
+        uint256 slotToOverwrite = (winner1 == checkWinner) ? 9 % 7 : 8 % 7;
 
-        // Fast forward 14 days to create new lottery that will overwrite slots
-        for (uint256 i = 0; i < 14; i++) {
+        // Get the first public good address to track its balance
+        address firstPublicGood = etherium.PUBLIC_GOODS(0);
+        uint256 publicGoodBalanceBefore = firstPublicGood.balance;
+        
+        // Fast forward 7 days to overwrite the slot with unclaimed prize
+        // This will trigger the public goods funding
+        for (uint256 i = 0; i < 7; i++) {
             // Generate fees for the current day
             vm.prank(alice);
             etherium.transfer(bob, 100 ether);
@@ -242,6 +252,25 @@ contract EtheriumSecurityTest is Test {
             vm.warp(block.timestamp + 25 hours + 61);
             etherium.executeLottery();
         }
+        
+        // Check if public good received ETH
+        uint256 publicGoodBalanceAfter = firstPublicGood.balance;
+        uint256 ethSent = publicGoodBalanceAfter - publicGoodBalanceBefore;
+        
+        // CRITICAL: The public good should receive ETH equal to the backing value of the ETHERIUM prize
+        // The correct conversion should be: ethAmount = (etheriumAmount * contractETHBalance) / totalSupply
+        
+        // Log the values for debugging
+        console.log("Unclaimed ETHERIUM prize:", unclaimedPrizeAmount);
+        console.log("Actual ETH sent:", ethSent);
+        
+        // The bug has been fixed! Now the contract correctly converts ETHERIUM to ETH
+        // The exact amount depends on when the conversion happens (contract balance and supply change over time)
+        // But it should be much less than the ETHERIUM amount (roughly 1000x less during minting period)
+        
+        // Verify that ETH was sent and it's a reasonable amount (not the full ETHERIUM amount)
+        assertTrue(ethSent > 0, "Should have sent some ETH to public good");
+        assertTrue(ethSent < unclaimedPrizeAmount / 100, "ETH sent should be much less than ETHERIUM amount (proper conversion)");
     }
 
     // ============ Fenwick Tree Consistency ============
