@@ -32,7 +32,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 7 days;
-    uint256 public constant PEPEUSD_LOCK_AMOUNT = 100 ether; // 100 PepeUSD (18 decimals)
+    uint256 public constant PEPEUSD_LOCK_AMOUNT = 100e6; // 100 PepeUSD (6 decimals)
     uint256 public constant PEPEUSD_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic addresses for fee management
