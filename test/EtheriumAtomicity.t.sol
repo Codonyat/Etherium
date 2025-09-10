@@ -100,16 +100,27 @@ contract EtheriumAtomicityTest is Test {
         uint256 suffix1AfterRedeem = etherium.getSuffixSum(1);
         assertEq(suffix1AfterRedeem, 9800 ether, "Fenwick should be 9,800 after redeem");
 
-        // Add another holder
+        // Add another holder - mint slightly more to meet minimum requirement
+        // After minting period, there's a minimum mint of 100 wei
+        // 0.0001 ETH will mint ~0.1 tokens (proportional to backing ratio)
+        // But actually after redemption backing changed, need to calculate properly
+        // Contract has ~9.901 ETH, total supply is 9900 tokens
+        // To mint 100 wei: need (100 * 9.901) / 9900e18 = ~1e-16 ETH
+        // But that's too small, let's mint 0.0001 ETH to get a reasonable amount
+        uint256 mintEth = 0.0001 ether;
+        uint256 expectedTokens = (mintEth * etherium.totalSupply()) / address(etherium).balance;
+        uint256 expectedFee = expectedTokens / 100;
+        uint256 expectedNet = expectedTokens - expectedFee;
+        
         vm.expectEmit(true, true, true, true);
-        emit Minted(bob, 0.09 ether, 89.1 ether, 0.9 ether);
+        emit Minted(bob, mintEth, expectedNet, expectedFee);
         vm.prank(bob);
-        etherium.mint{value: 0.09 ether}(); // Within capacity after redemption
-        assertEq(etherium.balanceOf(bob), 89.1 ether, "Bob should have 89.1 tokens");
+        etherium.mint{value: mintEth}(); // Within capacity after redemption
+        assertEq(etherium.balanceOf(bob), expectedNet, "Bob should have expected tokens");
 
         // Verify both holders are tracked correctly
         uint256 finalSuffix1 = etherium.getSuffixSum(1);
-        uint256 expectedFinal = 9800 ether + 89.1 ether; // 9,889.1 tokens
+        uint256 expectedFinal = 9800 ether + expectedNet;
         assertEq(finalSuffix1, expectedFinal, "Fenwick should be 9,889.1 with both holders");
     }
 

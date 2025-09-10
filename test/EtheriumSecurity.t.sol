@@ -93,7 +93,7 @@ contract EtheriumSecurityTest is Test {
     // ============ Max Supply Tests ============
 
     function testMaxSupplyEnforcement() public {
-        // Mint during minting period (100 ETH = 100,000 ETHERIUM, minus 1% fee = 99,000 net)
+        // Mint during minting period (100 ETH = 100,000 ETHERIUM total, alice gets 99,000 after 1% fee)
         vm.prank(alice);
         etherium.mint{value: 100 ether}();
 

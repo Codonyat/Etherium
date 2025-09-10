@@ -231,6 +231,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
                 totalSupply() + etheriumToMint <= maxSupplyEver,
                 "Max supply reached"
             );
+            require(etheriumToMint >= 100, "Minimum mint amount is 100 wei");
         }
 
         // Calculate and apply fees (common to both minting periods)
@@ -580,10 +581,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     ) internal {
         if (account == address(0)) return; // Skip zero address (minting/burning)
         if (account == LOT_POOL || account == FEES_POOL) return; // Skip synthetic addresses
-        
+
         uint32 currentDay = uint32(getCurrentDay());
         uint256 currentIndex = indexByHolder[account].latestValue;
-        
+
         // For contracts: only skip if they're not already in the tree
         // This prevents corruption from constructor bypass or CREATE2 pre-funding
         if (account.code.length > 0 && currentIndex == 0) return;
@@ -767,8 +768,9 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
                 // Calculate ETH value of the ETHERIUM prize
                 // ETH amount = (ETHERIUM amount * contract ETH balance) / total supply
-                uint256 ethToSend = (uint256(prize.amount) * address(this).balance) / totalSupply();
-                
+                uint256 ethToSend = (uint256(prize.amount) *
+                    address(this).balance) / totalSupply();
+
                 // Attempt to send ETH to public good
                 (bool success, ) = publicGood.call{value: ethToSend}("");
 
@@ -777,7 +779,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
                     _burn(LOT_POOL, prize.amount);
                     emit PublicGoodsFunded(
                         publicGood,
-                        ethToSend,  // Emit the actual ETH amount sent
+                        ethToSend, // Emit the actual ETH amount sent
                         prize.winner
                     );
                 } else {
@@ -851,7 +853,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
     function claim() external nonReentrant {
         // Check and set max supply before any transfers
         _checkAndSetMaxSupply();
-        
+
         uint256 totalClaimed = 0;
 
         // Check all 7 slots for both lottery and auction prizes in a single loop
@@ -1103,13 +1105,14 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
 
             // Calculate ETH value of the ETHERIUM prize
             // ETH amount = (ETHERIUM amount * contract ETH balance) / total supply
-            uint256 ethToSend = (uint256(prize.amount) * address(this).balance) / totalSupply();
-            
+            uint256 ethToSend = (uint256(prize.amount) *
+                address(this).balance) / totalSupply();
+
             (bool success, ) = publicGood.call{value: ethToSend}("");
 
             if (success) {
                 _burn(LOT_POOL, prize.amount);
-                emit PublicGoodsFunded(publicGood, ethToSend, prize.winner);  // Emit actual ETH amount
+                emit PublicGoodsFunded(publicGood, ethToSend, prize.winner); // Emit actual ETH amount
             } else {
                 // Add to current winner's prize
                 currentAuction.etheriumAmount += uint112(prize.amount);
@@ -1144,7 +1147,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      */
     function bid(uint256 bidAmount) external nonReentrant {
         require(currentAuction.auctionDay != 0, "No active auction");
-        
+
         // Check and set max supply (for consistency)
         _checkAndSetMaxSupply();
 

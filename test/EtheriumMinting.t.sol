@@ -166,7 +166,7 @@ contract EtheriumMintingTest is EtheriumTestBase {
         uint256 donationAmount = 5 ether;
 
         vm.prank(alice);
-        (bool success,) = address(etherium).call{value: donationAmount}("");
+        (bool success, ) = address(etherium).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
 
         // Contract balance should increase
@@ -177,8 +177,16 @@ contract EtheriumMintingTest is EtheriumTestBase {
         );
 
         // No tokens should be minted
-        assertEq(etherium.balanceOf(alice), 0, "No tokens should be minted for donations");
-        assertEq(etherium.totalSupply(), 0, "Total supply should remain unchanged");
+        assertEq(
+            etherium.balanceOf(alice),
+            0,
+            "No tokens should be minted for donations"
+        );
+        assertEq(
+            etherium.totalSupply(),
+            0,
+            "Total supply should remain unchanged"
+        );
     }
 
     function testContractsCanTransferEtherium() public {
@@ -198,37 +206,85 @@ contract EtheriumMintingTest is EtheriumTestBase {
         mockContract.transferEtherium(etherium, alice, 100 ether);
 
         // Verify transfer succeeded with 1% fee
-        assertEq(etherium.balanceOf(alice), 99 ether, "Alice should receive 99 after 1% fee");
-        assertEq(etherium.balanceOf(address(mockContract)), 890 ether, "Contract should have 890 left");
+        assertEq(
+            etherium.balanceOf(alice),
+            99 ether,
+            "Alice should receive 99 after 1% fee"
+        );
+        assertEq(
+            etherium.balanceOf(address(mockContract)),
+            890 ether,
+            "Contract should have 890 left"
+        );
 
         // Alice should now be tracked as holder (EOA)
-        assertTrue(etherium.isHolder(alice), "Alice should be tracked as holder");
+        assertTrue(
+            etherium.isHolder(alice),
+            "Alice should be tracked as holder"
+        );
 
         // Test 2: Contract can transfer to another contract
         MockContract secondContract = new MockContract();
-        mockContract.transferEtherium(etherium, address(secondContract), 200 ether);
+        mockContract.transferEtherium(
+            etherium,
+            address(secondContract),
+            200 ether
+        );
 
         // Verify transfer succeeded with 1% fee
-        assertEq(etherium.balanceOf(address(secondContract)), 198 ether, "Second contract should receive 198 after fee");
-        assertEq(etherium.balanceOf(address(mockContract)), 690 ether, "First contract should have 690 left");
+        assertEq(
+            etherium.balanceOf(address(secondContract)),
+            198 ether,
+            "Second contract should receive 198 after fee"
+        );
+        assertEq(
+            etherium.balanceOf(address(mockContract)),
+            690 ether,
+            "First contract should have 690 left"
+        );
 
         // Second contract should also not be tracked
-        assertFalse(etherium.isHolder(address(secondContract)), "Second contract should not be tracked");
+        assertFalse(
+            etherium.isHolder(address(secondContract)),
+            "Second contract should not be tracked"
+        );
 
         // Test 3: Contract can approve and another contract can transferFrom
-        mockContract.approveEtherium(etherium, address(secondContract), 300 ether);
-        assertEq(etherium.allowance(address(mockContract), address(secondContract)), 300 ether);
+        mockContract.approveEtherium(
+            etherium,
+            address(secondContract),
+            300 ether
+        );
+        assertEq(
+            etherium.allowance(address(mockContract), address(secondContract)),
+            300 ether
+        );
 
-        secondContract.transferFromEtherium(etherium, address(mockContract), alice, 300 ether);
+        secondContract.transferFromEtherium(
+            etherium,
+            address(mockContract),
+            alice,
+            300 ether
+        );
 
         // Verify transferFrom succeeded with 1% fee
         assertEq(
-            etherium.balanceOf(alice), 99 ether + 297 ether, "Alice should have original 99 + 297 from transferFrom"
+            etherium.balanceOf(alice),
+            99 ether + 297 ether,
+            "Alice should have original 99 + 297 from transferFrom"
         );
-        assertEq(etherium.balanceOf(address(mockContract)), 390 ether, "First contract should have 390 left");
+        assertEq(
+            etherium.balanceOf(address(mockContract)),
+            390 ether,
+            "First contract should have 390 left"
+        );
 
         // Test 4: Verify contracts are still excluded from lottery after transfers
-        assertEq(etherium.getHolderCount(), 1, "Only Alice should be counted as holder");
+        assertEq(
+            etherium.getHolderCount(),
+            1,
+            "Only Alice should be counted as holder"
+        );
 
         // Move past minting period and generate fees
         vm.warp(block.timestamp + 8 days);
@@ -242,10 +298,95 @@ contract EtheriumMintingTest is EtheriumTestBase {
 
         // Check that only Alice (EOA) could win, not the contracts
         uint256 currentDay = etherium.getCurrentDay();
-        (address winner,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        (address winner, ) = etherium.lotteryUnclaimedPrizes(
+            (currentDay - 1) % 7
+        );
         if (winner != address(0)) {
             // If there's a winner, it must be Alice (the only EOA holder)
-            assertEq(winner, alice, "Winner must be Alice, the only EOA holder");
+            assertEq(
+                winner,
+                alice,
+                "Winner must be Alice, the only EOA holder"
+            );
         }
+    }
+
+    function testMinimumMintAmountAfterMintingPeriod() public {
+        // First mint some tokens during minting period to create initial supply
+        vm.prank(alice);
+        etherium.mint{value: 1 ether}();
+
+        // Also mint for bob to have more supply
+        vm.prank(bob);
+        etherium.mint{value: 1 ether}();
+
+        // Move past minting period
+        vm.warp(block.timestamp + 8 days);
+
+        // Do a small transaction to trigger max supply setting
+        vm.prank(alice);
+        etherium.transfer(bob, 1 ether);
+
+        // Max supply is now set to 2000 ETHERIUM (2 ETH minted * 1000)
+        assertEq(
+            etherium.maxSupplyEver(),
+            2000 ether,
+            "Max supply should be 2000 ETHERIUM"
+        );
+
+        // Now burn some tokens to create capacity for new mints
+        vm.prank(alice);
+        etherium.redeem(500 ether); // Burn 500 tokens to create capacity
+
+        // State after redemption:
+        // - Alice had 990 - 0.99 (transfer) - 500 (redeem) = 489.01 ETHERIUM
+        // - Bob has 990 + 0.99 (from transfer) = 990.99 ETHERIUM
+        // - FEES_POOL has 10 + 10 + 0.01 (transfer fee) + 5 (redeem fee) = 25.01 ETHERIUM
+        // - Total supply = 489.01 + 990.99 + 25.01 = 1505.01 ETHERIUM
+        // - Contract ETH = 2 ETH - 0.495 ETH (redeemed) = 1.505 ETH
+
+        // Donate a large amount of ETH to increase the backing value
+        vm.deal(address(this), 10000 ether);
+        (bool success, ) = address(etherium).call{value: 10000 ether}("");
+        assertTrue(success, "ETH donation should succeed");
+
+        // Now we have:
+        // - Contract ETH = 1.505 + 10000 = 10001.505 ETH
+        // - Total supply = 1505.01 ETHERIUM
+        // - Mint formula: etheriumToMint = (msg.value * totalSupply) / ethBalance
+
+        // With 1 wei of ETH:
+        // etheriumToMint = (1 * 1505.01e18) / 10001.505e18 ≈ 0.15 wei (much less than 100!)
+
+        // Try to mint with 1 wei - should fail due to minimum requirement
+        vm.prank(charlie);
+        vm.expectRevert("Minimum mint amount is 100 wei");
+        etherium.mint{value: 1 wei}();
+
+        // To mint exactly 99 wei (below minimum):
+        // 99 = (ethAmount * 1505.01e18) / 10001.505e18
+        // ethAmount = 99 * 10001.505e18 / 1505.01e18 ≈ 657.79 wei
+        // Let's use 658 wei which should mint about 99 wei
+
+        vm.prank(charlie);
+        vm.expectRevert("Minimum mint amount is 100 wei");
+        etherium.mint{value: 658 wei}();
+
+        // To mint exactly 100 wei (at minimum):
+        // 100 = (ethAmount * 1505.01e18) / 10001.505e18
+        // ethAmount = 100 * 10001.505e18 / 1505.01e18 ≈ 664.63 wei
+        // Let's use 665 wei which should mint about 100 wei
+
+        // This should succeed as it mints at least 100 wei
+        vm.prank(charlie);
+        etherium.mint{value: 665 wei}();
+
+        // Verify Charlie received tokens (after 1% fee, so at least 99 wei)
+        uint256 charlieBalance = etherium.balanceOf(charlie);
+        assertEq(
+            charlieBalance,
+            99,
+            "Charlie should have exactly 99 wei after fee"
+        );
     }
 }
