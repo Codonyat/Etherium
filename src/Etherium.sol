@@ -263,9 +263,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             "Fee-free minting only during minting period"
         );
 
-        // Check and set max supply before any potential burns
-        _checkAndSetMaxSupply();
-
         // Try to execute pending lottery/auction before changing state
         _tryExecuteLotteryAndAuction();
 
