@@ -1042,13 +1042,11 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
         }
 
         // Calculate minimum bid for the ETHERIUM amount being auctioned
-        // MinBid = (ETH balance * feesToDistribute) / totalSupply
-        // Round up to ensure we never sell below backing value
+        // MinBid = (ETH balance * feesToDistribute) / (2 * totalSupply)
+        // This sets the minimum bid at 50% of the redemption value
         // Overflow safety: balance < 2^96, feesToDistribute < 2^112, product < 2^208
-        uint256 minBid = (address(this).balance *
-            feesToDistribute +
-            totalSupply() -
-            1) / totalSupply();
+        uint256 minBid = (address(this).balance * feesToDistribute) /
+            (2 * totalSupply());
 
         // Transfer fees from fees pool to lottery pool for auction
         _atomicUpdate(FEES_POOL, LOT_POOL, feesToDistribute);
@@ -1085,10 +1083,6 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             return;
         }
 
-        // Convert WETH to ETH for the winning bid
-        // This is safe because we control when this happens (no external call that could revert)
-        WETH.withdraw(currentAuction.currentBid);
-
         uint256 slot = currentAuction.auctionDay % 7; // Use 7 slots for auction prizes
 
         // Check if this slot has an unclaimed auction prize
@@ -1115,6 +1109,10 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
                 currentAuction.etheriumAmount += uint112(prize.amount);
             }
         }
+
+        // Convert WETH to ETH for the winning bid
+        // This is safe because we control when this happens (no external call that could revert)
+        WETH.withdraw(currentAuction.currentBid);
 
         // Store new prize
         prize.winner = currentAuction.currentBidder;

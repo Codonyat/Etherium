@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {EtheriumTestBase} from "./helpers/EtheriumTestBase.sol";
 import {console} from "forge-std/Test.sol";
 import {IWETH} from "../src/Etherium.sol";
-import {MockWETH} from "./helpers/MockWETH.sol";
+import {MockWETH} from "./helpers/WETHHelpers.sol";
 
 contract EtheriumUnclaimedPrizesBugTest is EtheriumTestBase {
     IWETH public constant WETH =

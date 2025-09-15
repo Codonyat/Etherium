@@ -221,6 +221,166 @@ contract EtheriumAuctionTest is WETHTestBase {
         (,,, uint112 auctionAmount,) = etherium.currentAuction();
         assertEq(auctionAmount, 595 ether, "Auction should have 595 tokens");
     }
+
+    function testMinimumBidCalculation() public {
+        // Test that minimum bid is calculated correctly
+        // New Formula: MinBid = (ETH balance * feesToDistribute) / (2 * totalSupply)
+
+        // Setup: Create known ETH balance and total supply
+        vm.prank(alice);
+        etherium.mint{value: 10 ether}(); // 9900 ETHERIUM to alice, 100 to fees
+        vm.prank(bob);
+        etherium.mint{value: 5 ether}(); // 4950 ETHERIUM to bob, 50 to fees
+
+        // Total supply: 9900 + 100 + 4950 + 50 = 15000 ETHERIUM
+        // ETH balance: 15 ETH
+        uint256 expectedTotalSupply = 15000 ether;
+        uint256 ethBalance = 15 ether;
+        assertEq(etherium.totalSupply(), expectedTotalSupply, "Total supply should be 15000 ETHERIUM");
+        assertEq(address(etherium).balance, ethBalance, "Contract should have 15 ETH");
+
+        // Move past minting period
+        vm.warp(block.timestamp + 8 days);
+
+        // Generate specific amount of fees for auction
+        vm.prank(alice);
+        etherium.transfer(bob, 1000 ether); // 10 ETHERIUM fee
+
+        // Execute to start auction - fees will be split 50/50 between lottery and auction
+        vm.warp(block.timestamp + 25 hours + 61);
+        etherium.executeLottery();
+
+        // Get auction details
+        (,, uint96 minBid, uint112 auctionAmount,) = etherium.currentAuction();
+
+        // After transfer: 10 ETHERIUM fee generated
+        // Split 50/50: 5 ETHERIUM for lottery, 5 ETHERIUM for auction
+        assertEq(auctionAmount, 5 ether, "Auction should be for 5 ETHERIUM");
+
+        // Calculate expected minimum bid with new formula
+        // MinBid = (ethBalance * auctionAmount) / (2 * totalSupply)
+        // = (15 ETH * 5 ETHERIUM) / (2 * 15000 ETHERIUM)
+        // = 75 / 30000 ETH
+        // = 0.0025 ETH = 2500000000000000 wei
+
+        uint256 expectedMinBid = (ethBalance * auctionAmount) / (2 * expectedTotalSupply);
+
+        assertEq(minBid, expectedMinBid, "Minimum bid should match calculated value");
+        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 ETH");
+
+        // Verify that bidding exactly the minimum bid works
+        getWETHAndApprove(alice, address(etherium), minBid);
+        vm.prank(alice);
+        etherium.bid(minBid);
+
+        (address currentBidder, uint96 currentBid,,,) = etherium.currentAuction();
+        assertEq(currentBidder, alice, "Alice should be current bidder");
+        assertEq(currentBid, minBid, "Current bid should equal minimum bid");
+
+        // Verify bidding below minimum fails
+        getWETHAndApprove(bob, address(etherium), minBid);
+        vm.prank(bob);
+        vm.expectRevert("Bid too low");
+        etherium.bid(minBid - 1);
+    }
+
+    function testMinimumBidWithDifferentBalances() public {
+        // Test minimum bid calculation with various ETH balances and fee amounts
+
+        // Scenario 1: Low ETH balance, high supply (deflated token)
+        vm.prank(alice);
+        etherium.mint{value: 100 ether}(); // 99000 ETHERIUM
+
+        // Burn most tokens to simulate deflation
+        vm.warp(block.timestamp + 8 days);
+        vm.prank(alice);
+        etherium.redeem(90000 ether); // Burns 89100 ETHERIUM, returns ~89.1 ETH
+
+        uint256 remainingSupply = etherium.totalSupply();
+        uint256 remainingETH = address(etherium).balance;
+
+        // Generate fees
+        vm.prank(alice);
+        etherium.transfer(bob, 1000 ether); // 10 ETHERIUM fee
+
+        // Start auction
+        vm.warp(block.timestamp + 25 hours + 61);
+        etherium.executeLottery();
+
+        (,, uint96 minBid1, uint112 auctionAmount1,) = etherium.currentAuction();
+
+        // Verify minimum bid with new formula
+        // MinBid = (ETH balance * auctionAmount) / (2 * totalSupply)
+        uint256 expectedMin1 = (remainingETH * auctionAmount1) / (2 * remainingSupply);
+        assertEq(minBid1, expectedMin1, "Min bid should match expected calculation");
+
+        // Scenario 2: High ETH balance from donations
+        // Reset with new deployment for clean state
+        vm.warp(block.timestamp + 30 days); // Clear any time dependencies
+
+        // Someone donates ETH to increase backing
+        vm.deal(address(this), 50 ether);
+        (bool sent,) = address(etherium).call{value: 50 ether}("");
+        assertTrue(sent, "ETH donation should succeed");
+
+        // Generate new fees
+        vm.prank(alice);
+        etherium.transfer(bob, 500 ether);
+
+        // Start new auction
+        vm.warp(block.timestamp + 25 hours + 61);
+        etherium.executeLottery();
+
+        (,, uint96 minBid2, uint112 auctionAmount2,) = etherium.currentAuction();
+
+        uint256 currentETH = address(etherium).balance;
+        uint256 currentSupply = etherium.totalSupply();
+        uint256 expectedMin2 = (currentETH * auctionAmount2) / (2 * currentSupply);
+
+        assertEq(minBid2, expectedMin2, "Min bid should reflect increased ETH backing");
+
+        // The minimum bid should be higher due to the donation increasing the backing value
+        assertTrue(minBid2 > minBid1, "Higher ETH backing should result in higher min bid");
+    }
+
+    function testMinimumBidFormula() public {
+        // Test that minimum bid uses the correct formula
+        // Formula: MinBid = (ETH balance * auctionAmount) / (2 * totalSupply)
+
+        // Using 3 ETH to create 3000 ETHERIUM total supply
+        vm.prank(alice);
+        etherium.mint{value: 3 ether}(); // 2970 ETHERIUM to alice, 30 to fees
+
+        vm.warp(block.timestamp + 8 days);
+
+        // Generate an odd fee amount: 7 ETHERIUM
+        // After split: 3.5 ETHERIUM for auction
+        vm.prank(alice);
+        etherium.transfer(bob, 700 ether); // 7 ETHERIUM fee
+
+        vm.warp(block.timestamp + 25 hours + 61);
+        etherium.executeLottery();
+
+        (,, uint96 minBid, uint112 auctionAmount,) = etherium.currentAuction();
+
+        uint256 ethBalance = address(etherium).balance;
+        uint256 totalSupply = etherium.totalSupply();
+
+        // The auction should have 3.5 ETHERIUM (half of 7)
+        assertEq(auctionAmount, 3.5 ether, "Auction should have 3.5 ETHERIUM");
+
+        // Calculate with new formula
+        // MinBid = (ethBalance * auctionAmount) / (2 * totalSupply)
+        // = (3 ETH * 3.5 ETHERIUM) / (2 * 3000 ETHERIUM)
+        // = 10.5 / 6000 = 0.00175 ETH
+        uint256 expectedMinBid = (ethBalance * auctionAmount) / (2 * totalSupply);
+
+        assertEq(minBid, expectedMinBid, "Minimum bid should match contract calculation");
+
+        // The minimum bid is now half of the redemption value
+        uint256 redemptionValue = (auctionAmount * ethBalance) / totalSupply;
+        assertEq(minBid, redemptionValue / 2, "Min bid should be half of redemption value");
+    }
 }
 
 // Test specifically for DoS prevention
