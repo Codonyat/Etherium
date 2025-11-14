@@ -17,7 +17,7 @@ interface IWMON {
 /**
  * @title MONSTR
  * @dev ERC20 token backed by MON with daily lottery and auction mechanics
- * - During 7-day minting period: 1 MON = 1000 MONSTR (both 18 decimals)
+ * - During 7-day minting period: 1 MON = 1 MONSTR (both 18 decimals)
  * - Redemption: Proportional share of contract's MON (MONSTR * MON balance / total supply)
  * - 1% fee on mint/burn/transfer (split between lottery and auction pools)
  * - Daily lottery for random holder using prevrandao
@@ -27,7 +27,7 @@ interface IWMON {
  * - Uses transient storage for reentrancy guard (EIP-1153) for gas efficiency
  */
 contract Strategy is ERC20, ReentrancyGuardTransient {
-    // Conversion: 1 MON = 1000 MONSTR during minting period (both 18 decimals)
+    // Conversion: 1 MON = 1 MONSTR during minting period (both 18 decimals)
     uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
@@ -216,9 +216,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         // Get balance before minting
         if (block.timestamp <= mintingEndTime) {
-            // During minting period: 1 MON = 1000 MONSTR
-            // Overflow safety: msg.value < 2^96, 1000 < 2^10, so product < 2^106 (fits in uint256)
-            monstrToMint = msg.value * 1000;
+            // During minting period: 1 MON = 1 MONSTR
+            // Overflow safety: msg.value < 2^96 (fits in uint256)
+            monstrToMint = msg.value;
         } else {
             // After minting period: proportional to MON/supply ratio
             uint256 monBalance = address(this).balance - msg.value; // Exclude sent MON
@@ -228,9 +228,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                 // Product < 2^208, which fits in uint256 (no overflow possible)
                 monstrToMint = (msg.value * totalSupply()) / monBalance;
             } else {
-                // Fallback to 1000:1 if no supply or MON
-                // Overflow safety: msg.value < 2^96, 1000 < 2^10, so product < 2^106 (fits in uint256)
-                monstrToMint = msg.value * 1000;
+                // Fallback to 1:1 if no supply or MON
+                // Overflow safety: msg.value < 2^96 (fits in uint256)
+                monstrToMint = msg.value;
             }
 
             require(
@@ -260,7 +260,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     /**
      * @dev Mint MONSTR fee-free by locking community tokens
      * Each lock allows one fee-free mint
-     * 1 MON = 1000 MONSTR (no fees deducted)
+     * 1 MON = 1 MONSTR (no fees deducted)
      * Disabled if COMMUNITY_TOKEN is address(0)
      */
     function mintFeeFree() external payable nonReentrant {
@@ -290,9 +290,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Track locked amount
         communityTokenLocked[msg.sender] += COMMUNITY_TOKEN_LOCK_AMOUNT;
 
-        // Mint without fees, 1 MON = 1000 MONSTR during minting period
-        // Overflow safety: msg.value < 2^96, 1000 < 2^10, product < 2^106 (no overflow)
-        uint256 monstrToMint = msg.value * 1000;
+        // Mint without fees, 1 MON = 1 MONSTR during minting period
+        // Overflow safety: msg.value < 2^96 (fits in uint256)
+        uint256 monstrToMint = msg.value;
 
         // After minting period: enforce max supply limit
         if (block.timestamp > mintingEndTime) {
