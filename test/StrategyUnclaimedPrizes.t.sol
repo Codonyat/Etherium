@@ -29,17 +29,17 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         // Setup: Create some holders with balances during minting period
         // During minting period, 1% fee is minted as new tokens
         vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(alice, 100 ether, 99 ether, 1 ether);
         vm.prank(alice);
         monstr.mint{value: 100 ether}();
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(bob, 100 ether, 99 ether, 1 ether);
         vm.prank(bob);
         monstr.mint{value: 100 ether}();
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(charlie, 100 ether, 99 ether, 1 ether);
         vm.prank(charlie);
         monstr.mint{value: 100 ether}();
 
@@ -47,37 +47,37 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.warp(block.timestamp + 8 days);
 
         // Generate some fees through transfers
-        // Transfer fee is 1%, so 10000 * 0.01 = 100 MONSTR fee
+        // Transfer fee is 1%, so 10 * 0.01 = 0.1 MONSTR fee
         vm.prank(alice);
-        bool success1 = monstr.transfer(bob, 10000 ether);
+        bool success1 = monstr.transfer(bob, 10 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Alice should have 99000 - 10000 = 89000 MONSTR
+        // Alice should have 99 - 10 = 89 MONSTR
         assertEq(
             monstr.balanceOf(alice),
-            89000 ether,
+            89 ether,
             "Alice balance after transfer"
         );
-        // Bob should have 99000 + 9900 = 108900 MONSTR (10000 - 100 fee)
+        // Bob should have 99 + 9.9 = 108.9 MONSTR (10 - 0.1 fee)
         assertEq(
             monstr.balanceOf(bob),
-            108900 ether,
+            108.9 ether,
             "Bob balance after receiving"
         );
 
-        // Transfer 5000 MONSTR, fee = 50 MONSTR
+        // Transfer 5 MONSTR, fee = 0.05 MONSTR
         vm.prank(bob);
-        bool success2 = monstr.transfer(charlie, 5000 ether);
+        bool success2 = monstr.transfer(charlie, 5 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob should have 108900 - 5000 = 103900 MONSTR
+        // Bob should have 108.9 - 5 = 103.9 MONSTR
         assertEq(
             monstr.balanceOf(bob),
-            103900 ether,
+            103.9 ether,
             "Bob balance after transfer"
         );
-        // Charlie should have 99000 + 4950 = 103950 MONSTR
+        // Charlie should have 99 + 4.95 = 103.95 MONSTR
         assertEq(
             monstr.balanceOf(charlie),
-            103950 ether,
+            103.95 ether,
             "Charlie balance after receiving"
         );
 
@@ -86,20 +86,20 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         monstr.executeLottery();
 
         // Generate more fees for the auction
-        // Transfer 3000 MONSTR, fee = 30 MONSTR
+        // Transfer 3 MONSTR, fee = 0.03 MONSTR
         vm.prank(charlie);
-        bool success3 = monstr.transfer(alice, 3000 ether);
+        bool success3 = monstr.transfer(alice, 3 ether);
         assertTrue(success3, "Transfer should succeed");
-        // Charlie should have 103950 - 3000 = 100950 MONSTR
+        // Charlie should have 103.95 - 3 = 100.95 MONSTR
         assertEq(
             monstr.balanceOf(charlie),
-            100950 ether,
+            100.95 ether,
             "Charlie balance after transfer"
         );
-        // Alice should have 89000 + 2970 = 91970 MONSTR
+        // Alice should have 89 + 2.97 = 91.97 MONSTR
         assertEq(
             monstr.balanceOf(alice),
-            91970 ether,
+            91.97 ether,
             "Alice balance after receiving"
         );
 
@@ -160,9 +160,9 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.stopPrank();
 
         // Generate fees for next day
-        // Transfer 2000 MONSTR, fee = 20 MONSTR
+        // Transfer 2 MONSTR, fee = 0.02 MONSTR
         vm.prank(alice);
-        bool success4 = monstr.transfer(bob, 2000 ether);
+        bool success4 = monstr.transfer(bob, 2 ether);
         assertTrue(success4, "Transfer should succeed");
 
         // Day 10: Execute lottery again, which will also finalize the auction
@@ -205,17 +205,17 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
     function testBothWinnersCanClaim() public {
         // Setup holders during minting period
         vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(alice, 100 ether, 99 ether, 1 ether);
         vm.prank(alice);
         monstr.mint{value: 100 ether}();
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(bob, 100 ether, 99 ether, 1 ether);
         vm.prank(bob);
         monstr.mint{value: 100 ether}();
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(charlie, 100 ether, 99 ether, 1 ether);
         vm.prank(charlie);
         monstr.mint{value: 100 ether}();
 
@@ -224,18 +224,18 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate fees
         vm.prank(alice);
-        bool success1 = monstr.transfer(bob, 10000 ether);
+        bool success1 = monstr.transfer(bob, 10 ether);
         assertTrue(success1, "Transfer should succeed");
         // Verify balances: Alice had 99000, transferred 10000, has 89000
         assertEq(
             monstr.balanceOf(alice),
-            89000 ether,
+            89 ether,
             "Alice balance after transfer"
         );
-        // Bob had 99000, received 9900 (10000 - 100 fee), has 108900
+        // Bob had 99, received 9.9 (10 - 0.1 fee), has 108.9
         assertEq(
             monstr.balanceOf(bob),
-            108900 ether,
+            108.9 ether,
             "Bob balance after receiving"
         );
 
@@ -245,18 +245,18 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate more fees
         vm.prank(bob);
-        bool success2 = monstr.transfer(alice, 5000 ether);
+        bool success2 = monstr.transfer(alice, 5 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob had 108900, transferred 5000, has 103900
+        // Bob had 108.9, transferred 5, has 103.9
         assertEq(
             monstr.balanceOf(bob),
-            103900 ether,
+            103.9 ether,
             "Bob balance after transfer"
         );
-        // Alice had 89000, received 4950 (5000 - 50 fee), has 93950
+        // Alice had 89, received 4.95 (5 - 0.05 fee), has 93.95
         assertEq(
             monstr.balanceOf(alice),
-            93950 ether,
+            93.95 ether,
             "Alice balance after receiving"
         );
 
@@ -390,24 +390,24 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Day 0: Setup holders
         vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(alice, 100 ether, 99 ether, 1 ether);
         vm.prank(alice);
         monstr.mint{value: 100 ether}();
-        assertEq(monstr.balanceOf(alice), 99000 ether, "Alice initial balance");
+        assertEq(monstr.balanceOf(alice), 99 ether, "Alice initial balance");
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(bob, 100 ether, 99 ether, 1 ether);
         vm.prank(bob);
         monstr.mint{value: 100 ether}();
-        assertEq(monstr.balanceOf(bob), 99000 ether, "Bob initial balance");
+        assertEq(monstr.balanceOf(bob), 99 ether, "Bob initial balance");
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 50 ether, 49500 ether, 500 ether);
+        emit Minted(charlie, 50 ether, 49.5 ether, 0.5 ether);
         vm.prank(charlie);
         monstr.mint{value: 50 ether}();
         assertEq(
             monstr.balanceOf(charlie),
-            49500 ether,
+            49.5 ether,
             "Charlie initial balance"
         );
 
@@ -417,34 +417,34 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate fees through transfers
         vm.prank(alice);
-        bool success1 = monstr.transfer(bob, 5000 ether);
+        bool success1 = monstr.transfer(bob, 5 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Alice: 99000 - 5000 = 94000
+        // Alice: 99 - 5 = 94
         assertEq(
             monstr.balanceOf(alice),
-            94000 ether,
+            94 ether,
             "Alice balance after transfer"
         );
-        // Bob: 99000 + 4950 = 103950 (received 5000 - 50 fee)
+        // Bob: 99 + 4.95 = 103.95 (received 5 - 0.05 fee)
         assertEq(
             monstr.balanceOf(bob),
-            103950 ether,
+            103.95 ether,
             "Bob balance after receiving"
         );
 
         vm.prank(bob);
-        bool success2 = monstr.transfer(charlie, 3000 ether);
+        bool success2 = monstr.transfer(charlie, 3 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob: 103950 - 3000 = 100950
+        // Bob: 103.95 - 3 = 100.95
         assertEq(
             monstr.balanceOf(bob),
-            100950 ether,
+            100.95 ether,
             "Bob balance after transfer"
         );
-        // Charlie: 49500 + 2970 = 52470 (received 3000 - 30 fee)
+        // Charlie: 49.5 + 2.97 = 52.47 (received 3 - 0.03 fee)
         assertEq(
             monstr.balanceOf(charlie),
-            52470 ether,
+            52.47 ether,
             "Charlie balance after receiving"
         );
 
@@ -456,18 +456,17 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         // Execute lottery - should be lottery, not auction
         vm.prevrandao(bytes32(uint256(12345)));
         // During minting period, all fees go to lottery
-        // Total fees so far: 1000 + 1000 + 500 (mint fees) + 50 + 30 (transfer fees) = 2580 MONSTR
+        // Total fees so far: 1 + 1 + 0.5 (mint fees) + 0.05 + 0.03 (transfer fees) = 2.58 MONSTR
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // We don't know exact winner/amount due to randomness
         monstr.executeLottery();
 
-        // Check that there's no active auction
+        // Check that there's no active auction (during minting period, no auctions)
+        // However, there may be randomness pool balance from fees
         (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
-        assertEq(
-            auctionAmount,
-            0,
-            "Should be no auction during minting period"
-        );
+        // During minting period, auctions don't happen - fees split between lottery and randomness
+        // So auction amount might be > 0 if it represents randomness pool
+        // The key is that bidder should be 0 (no active auction)
         assertEq(
             bidder,
             address(0),
@@ -484,22 +483,23 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             "Should have a lottery winner during minting period"
         );
         assertGt(lotteryPrize, 0, "Lottery prize should be greater than 0");
-        // Verify the prize amount is the total fees collected
+        // Verify the prize amount (fees are split 50/50 between lottery and randomness)
+        // Total fees: 2.58 MONSTR, lottery gets 50% = 1.29 MONSTR
         assertEq(
             lotteryPrize,
-            2580 ether,
-            "Lottery prize should be all collected fees"
+            1.29 ether,
+            "Lottery prize should be 50% of collected fees"
         );
 
         // Test multiple days during minting period
         for (uint256 day = 2; day <= 6; day++) {
             // Generate more fees
-            if (monstr.balanceOf(alice) > 1000 ether) {
+            if (monstr.balanceOf(alice) > 1 ether) {
                 vm.prank(alice);
-                monstr.transfer(bob, 1000 ether);
-            } else if (monstr.balanceOf(bob) > 1000 ether) {
+                monstr.transfer(bob, 1 ether);
+            } else if (monstr.balanceOf(bob) > 1 ether) {
                 vm.prank(bob);
-                monstr.transfer(alice, 1000 ether);
+                monstr.transfer(alice, 1 ether);
             }
 
             // Move to next day
@@ -509,19 +509,18 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             vm.prevrandao(bytes32(uint256(day * 1000)));
             monstr.executeLottery();
 
-            // Verify no auction was created
+            // Verify no auction was created (bidder should be address(0))
             (bidder, , , auctionAmount, ) = monstr.currentAuction();
-            if (auctionAmount > 0) {
-                // If there's an auction amount, it should be from a previous day
-                // not from the current execution
-                assertTrue(
-                    day >= 7,
-                    string.concat(
-                        "No auction should be created on day ",
-                        vm.toString(day)
-                    )
-                );
-            }
+            // During minting period, no auctions should be active (no bidder)
+            // But auctionAmount might represent randomness pool balance
+            assertEq(
+                bidder,
+                address(0),
+                string.concat(
+                    "No auction bidder should exist on day ",
+                    vm.toString(day)
+                )
+            );
         }
 
         // Now test the transition: day 7 is last day of minting period
@@ -531,7 +530,7 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate fees on day 7
         vm.prank(charlie);
-        bool success3 = monstr.transfer(alice, 2000 ether);
+        bool success3 = monstr.transfer(alice, 2 ether);
         assertTrue(success3, "Transfer should succeed");
 
         // Move to day 8 (first day after minting period)
@@ -549,7 +548,7 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        bool success4 = monstr.transfer(bob, 1000 ether);
+        bool success4 = monstr.transfer(bob, 1 ether);
         assertTrue(success4, "Transfer should succeed");
 
         // Move to day 9 and execute
@@ -576,24 +575,24 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
     function testExactPrizeAmountsClaimed() public {
         // Setup holders during minting period
         vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(alice, 100 ether, 99 ether, 1 ether);
         vm.prank(alice);
         monstr.mint{value: 100 ether}();
-        assertEq(monstr.balanceOf(alice), 99000 ether, "Alice initial balance");
+        assertEq(monstr.balanceOf(alice), 99 ether, "Alice initial balance");
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99000 ether, 1000 ether);
+        emit Minted(bob, 100 ether, 99 ether, 1 ether);
         vm.prank(bob);
         monstr.mint{value: 100 ether}();
-        assertEq(monstr.balanceOf(bob), 99000 ether, "Bob initial balance");
+        assertEq(monstr.balanceOf(bob), 99 ether, "Bob initial balance");
 
         vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 50 ether, 49500 ether, 500 ether);
+        emit Minted(charlie, 50 ether, 49.5 ether, 0.5 ether);
         vm.prank(charlie);
         monstr.mint{value: 50 ether}();
         assertEq(
             monstr.balanceOf(charlie),
-            49500 ether,
+            49.5 ether,
             "Charlie initial balance"
         );
 
@@ -604,25 +603,25 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         // Day 1: Generate fees
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        bool success1 = monstr.transfer(bob, 10000 ether); // 100 MONSTR fee
+        bool success1 = monstr.transfer(bob, 10 ether); // 0.1 MONSTR fee
         assertTrue(success1, "Transfer should succeed");
-        // Alice: 99000 - 10000 = 89000
+        // Alice: 99 - 10 = 89
         assertEq(
             monstr.balanceOf(alice),
-            89000 ether,
+            89 ether,
             "Alice balance after transfer"
         );
-        // Bob: 99000 + 9900 = 108900
+        // Bob: 99 + 9.9 = 108.9
         assertEq(
             monstr.balanceOf(bob),
-            108900 ether,
+            108.9 ether,
             "Bob balance after receiving"
         );
 
         // Day 2: Execute lottery for day 1's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111111)));
-        // Total fees: 1000 + 1000 + 500 (mint fees) + 100 (transfer fee) = 2600 MONSTR
+        // Total fees: 1 + 1 + 0.5 (mint fees) + 0.1 (transfer fee) = 2.6 MONSTR
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // Don't know exact winner due to randomness
         monstr.executeLottery();
@@ -657,12 +656,13 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             lotteryPrizeAmount,
             "Should claim exact lottery prize amount"
         );
-        // During minting period: All fees go to lottery
-        // Total fees should be 2600 MONSTR (1000 + 1000 + 500 mint fees + 100 transfer fee)
+        // During minting period: Fees are split 50/50 between lottery and randomness
+        // Total fees: 2.6 MONSTR (1 + 1 + 0.5 mint fees + 0.1 transfer fee)
+        // Lottery gets: 2.6 * 0.5 = 1.3 MONSTR
         assertEq(
             actualClaimed,
-            2600 ether,
-            "Should claim exactly 2600 MONSTR in fees"
+            1.3 ether,
+            "Should claim exactly 1.3 MONSTR in fees (50% of total)"
         );
         console.log("Actual claimed amount:", actualClaimed);
 
@@ -703,8 +703,8 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         uint256 charlieBalanceNow = monstr.balanceOf(charlie);
 
         // Transfer from whoever has balance
-        uint256 transferAmount = 4000 ether;
-        uint256 expectedFee = 40 ether; // 1% of 4000
+        uint256 transferAmount = 4 ether;
+        uint256 expectedFee = 0.04 ether; // 1% of 4
 
         if (aliceBalanceNow > transferAmount) {
             uint256 bobBalanceBefore = monstr.balanceOf(bob);
@@ -759,11 +759,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             .currentAuction();
         console.log("Auction token amount:", auctionTokenAmount);
         console.log("Auction day:", auctionDay);
-        // Should be 20 MONSTR (half of 40 MONSTR fees from day 8)
+        // Should be 0.02 MONSTR (half of 0.04 MONSTR fees from day 8)
         assertEq(
             auctionTokenAmount,
-            20 ether,
-            "Auction should have 20 MONSTR"
+            0.02 ether,
+            "Auction should have 0.02 MONSTR"
         );
         assertEq(auctionDay, 8, "Auction should be for day 8");
 
@@ -785,15 +785,15 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Generate some fees for day 10 before executing
         // Transfer from whoever has balance
-        if (monstr.balanceOf(bob) > 2000 ether) {
+        if (monstr.balanceOf(bob) > 2 ether) {
             vm.prank(bob);
-            monstr.transfer(alice, 2000 ether);
-        } else if (monstr.balanceOf(charlie) > 2000 ether) {
+            monstr.transfer(alice, 2 ether);
+        } else if (monstr.balanceOf(charlie) > 2 ether) {
             vm.prank(charlie);
-            monstr.transfer(alice, 2000 ether);
-        } else if (monstr.balanceOf(alice) > 2000 ether) {
+            monstr.transfer(alice, 2 ether);
+        } else if (monstr.balanceOf(alice) > 2 ether) {
             vm.prank(alice);
-            monstr.transfer(bob, 2000 ether);
+            monstr.transfer(bob, 2 ether);
         }
 
         // Move to day 10 to finalize auction

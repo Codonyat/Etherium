@@ -39,8 +39,8 @@ contract StrategyDonationTest is Test {
     function testDonationIncreasesRedemptionValue() public {
         // Alice mints first
         uint256 mintAmount = 10 ether;
-        uint256 expectedTokens = mintAmount * 990; // 9,900 tokens after 1% fee
-        uint256 expectedFee = mintAmount * 10; // 100 tokens fee
+        uint256 expectedTokens = mintAmount * 99 / 100; // 9.9 tokens after 1% fee
+        uint256 expectedFee = mintAmount / 100; // 0.1 tokens fee
 
         vm.expectEmit(true, true, true, true);
         emit Minted(alice, mintAmount, expectedTokens, expectedFee);
@@ -51,20 +51,20 @@ contract StrategyDonationTest is Test {
         assertEq(
             monstr.balanceOf(alice),
             expectedTokens,
-            "Alice should receive 9,900 tokens"
+            "Alice should receive 9.9 tokens"
         );
         assertEq(
             monstr.balanceOf(monstr.FEES_POOL()),
             expectedFee,
-            "Fees pool should have 100 tokens"
+            "Fees pool should have 0.1 tokens"
         );
 
         uint256 totalSupplyBefore = monstr.totalSupply();
         uint256 contractBalanceBefore = address(monstr).balance;
         assertEq(
             totalSupplyBefore,
-            10000 ether,
-            "Total supply should be 10,000 tokens"
+            10 ether,
+            "Total supply should be 10 tokens"
         );
         assertEq(
             contractBalanceBefore,
@@ -73,9 +73,9 @@ contract StrategyDonationTest is Test {
         );
 
         // Calculate redemption value before donation
-        uint256 redeemAmount = 1000 ether; // 1000 MONSTR
-        uint256 fee = redeemAmount / 100; // 10 MONSTR fee
-        uint256 netAmount = redeemAmount - fee; // 990 MONSTR
+        uint256 redeemAmount = 1 ether; // 1 MONSTR
+        uint256 fee = redeemAmount / 100; // 0.01 MONSTR fee
+        uint256 netAmount = redeemAmount - fee; // 0.99 MONSTR
         uint256 redemptionValueBefore = (netAmount * contractBalanceBefore) /
             totalSupplyBefore;
         assertEq(
@@ -101,7 +101,7 @@ contract StrategyDonationTest is Test {
         assertEq(
             monstr.totalSupply(),
             totalSupplyBefore,
-            "Total supply should remain 10,000 tokens"
+            "Total supply should remain 10 tokens"
         );
 
         // Calculate redemption value after donation
@@ -124,14 +124,14 @@ contract StrategyDonationTest is Test {
     function testDonationDoesntAffectMinting() public {
         // Initial mint
         vm.expectEmit(true, true, true, true);
-        emit Minted(alice, 1 ether, 990 ether, 10 ether);
+        emit Minted(alice, 1 ether, 0.99 ether, 0.01 ether);
 
         vm.prank(alice);
         monstr.mint{value: 1 ether}();
         assertEq(
             monstr.balanceOf(alice),
-            990 ether,
-            "Alice should get 990 tokens"
+            0.99 ether,
+            "Alice should get 0.99 tokens"
         );
 
         // Donate MON
@@ -147,16 +147,16 @@ contract StrategyDonationTest is Test {
 
         // Bob mints after donation
         vm.expectEmit(true, true, true, true);
-        emit Minted(bob, 1 ether, 990 ether, 10 ether);
+        emit Minted(bob, 1 ether, 0.99 ether, 0.01 ether);
 
         vm.prank(bob);
         monstr.mint{value: 1 ether}();
 
-        // Bob should still get the standard amount (990 MONSTR after 1% fee)
+        // Bob should still get the standard amount (0.99 MONSTR after 1% fee)
         assertEq(
             monstr.balanceOf(bob),
-            990 ether,
-            "Bob should get 990 tokens despite donation"
+            0.99 ether,
+            "Bob should get 0.99 tokens despite donation"
         );
         assertEq(
             address(monstr).balance,
@@ -171,40 +171,40 @@ contract StrategyDonationTest is Test {
         monstr.mint{value: 10 ether}();
         assertEq(
             monstr.balanceOf(alice),
-            9900 ether,
-            "Alice should have 9,900 tokens"
+            9.9 ether,
+            "Alice should have 9.9 tokens"
         );
 
         vm.prank(bob);
         monstr.mint{value: 10 ether}();
         assertEq(
             monstr.balanceOf(bob),
-            9900 ether,
-            "Bob should have 9,900 tokens"
+            9.9 ether,
+            "Bob should have 9.9 tokens"
         );
 
         // Generate fees on day 0
-        uint256 transferAmount = 1000 ether;
+        uint256 transferAmount = 1 ether;
 
         vm.expectEmit(true, true, true, true);
-        emit Transfer(alice, bob, 990 ether); // Bob receives 990 after fee
+        emit Transfer(alice, bob, 0.99 ether); // Bob receives 0.99 after fee
 
         vm.prank(alice);
         monstr.transfer(bob, transferAmount);
         assertEq(
             monstr.balanceOf(alice),
-            8900 ether,
-            "Alice should have 8,900 tokens"
+            8.9 ether,
+            "Alice should have 8.9 tokens"
         );
         assertEq(
             monstr.balanceOf(bob),
-            10890 ether,
-            "Bob should have 10,890 tokens"
+            10.89 ether,
+            "Bob should have 10.89 tokens"
         );
         assertEq(
             monstr.balanceOf(monstr.FEES_POOL()),
-            210 ether,
-            "Fees pool should have 210 tokens"
+            0.21 ether,
+            "Fees pool should have 0.21 tokens"
         );
 
         // Donate MON
@@ -223,24 +223,24 @@ contract StrategyDonationTest is Test {
 
         // Generate fees on day 1
         vm.expectEmit(true, true, true, true);
-        emit Transfer(bob, alice, 990 ether);
+        emit Transfer(bob, alice, 0.99 ether);
 
         vm.prank(bob);
         monstr.transfer(alice, transferAmount);
         assertEq(
             monstr.balanceOf(bob),
-            9890 ether,
-            "Bob should have 9,890 tokens"
+            9.89 ether,
+            "Bob should have 9.89 tokens"
         );
         assertEq(
             monstr.balanceOf(alice),
-            9890 ether,
-            "Alice should have 9,890 tokens"
+            9.89 ether,
+            "Alice should have 9.89 tokens"
         );
         assertEq(
             monstr.balanceOf(monstr.FEES_POOL()),
-            220 ether,
-            "Fees pool should have 220 tokens"
+            0.22 ether,
+            "Fees pool should have 0.22 tokens"
         );
 
         // Move to day 2 and execute lottery
@@ -277,7 +277,7 @@ contract StrategyDonationTest is Test {
         assertEq(address(monstr).balance, initialBalance + 5 ether);
 
         // Total supply should be unchanged
-        assertEq(monstr.totalSupply(), 1000 ether); // Only from Alice's mint
+        assertEq(monstr.totalSupply(), 1 ether); // Only from Alice's mint (1:1 ratio)
     }
 
     function testDonationAfterMintingPeriod() public {
@@ -290,7 +290,7 @@ contract StrategyDonationTest is Test {
 
         // Alice redeems to trigger max supply setting
         vm.prank(alice);
-        monstr.redeem(100 ether);
+        monstr.redeem(0.1 ether);
 
         uint256 maxSupply = monstr.maxSupplyEver();
         assertTrue(maxSupply > 0, "Max supply should be set");
@@ -312,13 +312,13 @@ contract StrategyDonationTest is Test {
         // Alice mints
         uint256 mintAmount = 10 ether;
         vm.expectEmit(true, true, true, true);
-        emit Minted(alice, mintAmount, 9900 ether, 100 ether);
+        emit Minted(alice, mintAmount, 9.9 ether, 0.1 ether);
 
         vm.prank(alice);
         monstr.mint{value: mintAmount}();
 
         uint256 aliceTokens = monstr.balanceOf(alice);
-        assertEq(aliceTokens, 9900 ether, "Alice should have 9,900 tokens");
+        assertEq(aliceTokens, 9.9 ether, "Alice should have 9.9 tokens");
 
         // Donate 5 MON
         uint256 donationAmount = 5 ether;
@@ -360,7 +360,7 @@ contract StrategyDonationTest is Test {
         );
         assertEq(
             monstr.balanceOf(alice),
-            4950 ether,
+            4.95 ether,
             "Alice should have 4,950 tokens left"
         );
     }
@@ -389,6 +389,6 @@ contract StrategyDonationTest is Test {
 
         // Verify accounting
         assertEq(address(monstr).balance, initialBalance + totalDonated);
-        assertEq(monstr.totalSupply(), 1000 ether); // Unchanged
+        assertEq(monstr.totalSupply(), 1 ether); // Unchanged
     }
 }

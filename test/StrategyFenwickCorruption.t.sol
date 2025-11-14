@@ -125,16 +125,16 @@ contract StrategyFenwickCorruptionTest is Test {
         console.log("Initial Fenwick sum:", initialFenwick);
         
         // Contract transfers some tokens
-        malicious.transfer(alice, 1000 ether);
-        
+        malicious.transfer(alice, 1 ether);
+
         uint256 afterTransferFenwick = monstr.getSuffixSum(1);
         console.log("Fenwick sum after transfer:", afterTransferFenwick);
-        
+
         // The Fenwick tree should be properly updated
-        // Alice gained 990 tokens, so Fenwick should increase by 990
+        // Alice gained 0.99 tokens, so Fenwick should increase by 0.99
         assertEq(
             afterTransferFenwick,
-            initialFenwick - 10 ether, // Net decrease of 10 (fee)
+            initialFenwick - 0.01 ether, // Net decrease of 0.01 (fee)
             "Fenwick tree should be properly updated"
         );
         
@@ -164,10 +164,10 @@ contract StrategyFenwickCorruptionTest is Test {
         // Alice mints tokens
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
-        
+
         // Alice sends tokens to the future contract address (before deployment)
         vm.prank(alice);
-        monstr.transfer(futureContract, 5000 ether);
+        monstr.transfer(futureContract, 5 ether);
         
         // The future address should be in the Fenwick tree as an EOA
         uint256 holderCountBefore = monstr.getHolderCount();
@@ -189,15 +189,15 @@ contract StrategyFenwickCorruptionTest is Test {
         assertGt(contractBalance, 0, "Contract should have pre-funded tokens");
         
         // With the fix, when the contract transfers tokens, Fenwick should update
-        deployedContract.transfer(bob, 1000 ether);
-        
+        deployedContract.transfer(bob, 1 ether);
+
         uint256 fenwickAfter = monstr.getSuffixSum(1);
         console.log("Fenwick sum after contract transfer:", fenwickAfter);
-        
-        // The deployed contract minted 4950 tokens in its constructor, getting added to tree
-        // After transfer: contract loses 1000, bob gains 990, net -10
-        // Expected: 9850 + 4950 - 10 = 14790
-        assertEq(fenwickAfter, fenwickBefore + 4950 ether - 10 ether, "Fenwick includes contract due to constructor mint");
+
+        // The deployed contract minted 4.95 tokens in its constructor, getting added to tree
+        // After transfer: contract loses 1, bob gains 0.99, net -0.01
+        // Expected: 9.85 + 4.95 - 0.01 = 14.79
+        assertEq(fenwickAfter, fenwickBefore + 4.95 ether - 0.01 ether, "Fenwick includes contract due to constructor mint");
         
         // Transfer remaining balance
         uint256 remaining = deployedContract.getBalance();
@@ -235,7 +235,7 @@ contract StrategyFenwickCorruptionTest is Test {
         
         // Even after transfers, contract should not enter Fenwick tree
         vm.prank(address(normalContract));
-        monstr.transfer(alice, 1000 ether);
+        monstr.transfer(alice, 1 ether);
         
         // Now Alice should be tracked
         holderCount = monstr.getHolderCount();
@@ -257,8 +257,8 @@ contract StrategyFenwickCorruptionTest is Test {
         console.log("Initial holder count:", initialHolderCount);
         
         // Both contracts transfer to create EOA holders
-        mal1.transfer(alice, 2000 ether);
-        mal2.transfer(bob, 2000 ether);
+        mal1.transfer(alice, 2 ether);
+        mal2.transfer(bob, 2 ether);
         
         // Check Fenwick consistency
         uint256 fenwickSum = monstr.getSuffixSum(1);

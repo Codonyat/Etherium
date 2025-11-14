@@ -90,12 +90,12 @@ contract StrategyMaxSupplyOrderTest is Test {
         vm.prank(charlie);
         monstr.mint{value: 20 ether}();
 
-        // Total supply after minting: 100 MON * 1:1 = 100 MONSTR
+        // Total supply after minting: 100 MON * 1:1 = 100 MONSTR (99 to users + 1 fees)
         uint256 totalSupplyAtEndOfMinting = monstr.totalSupply();
         assertEq(
             totalSupplyAtEndOfMinting,
-            100_000 ether,
-            "Total supply should be 100,000 MONSTR"
+            100 ether,
+            "Total supply should be 100 MONSTR"
         );
 
         // Move past minting period
@@ -110,7 +110,7 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // First transaction after minting period - a simple transfer
         vm.prank(alice);
-        monstr.transfer(bob, 100 ether);
+        monstr.transfer(bob, 1 ether);
 
         // Max supply should now be set to the total supply BEFORE the transfer
         uint256 maxSupplyEver = monstr.maxSupplyEver();
@@ -121,8 +121,8 @@ contract StrategyMaxSupplyOrderTest is Test {
         );
         assertEq(
             maxSupplyEver,
-            100_000 ether,
-            "Max supply should be 100,000 MONSTR"
+            100 ether,
+            "Max supply should be 100 MONSTR"
         );
 
         // Current supply is actually MORE than max due to transfer fee being added to FEES_POOL
@@ -136,7 +136,7 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // Verify max supply never changes
         vm.prank(bob);
-        monstr.transfer(charlie, 200 ether);
+        monstr.transfer(charlie, 2 ether);
 
         assertEq(
             monstr.maxSupplyEver(),
@@ -155,7 +155,7 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // Day 0: Generate fees
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1 ether);
 
         // Day 1: Execute lottery to create a winner
         vm.warp(block.timestamp + 25 hours + 61);
@@ -165,7 +165,7 @@ contract StrategyMaxSupplyOrderTest is Test {
         // Generate fees each day to keep lottery going
         for (uint256 i = 0; i < 7; i++) {
             vm.prank(bob);
-            monstr.transfer(alice, 100 ether);
+            monstr.transfer(alice, 0.1 ether);
 
             vm.warp(block.timestamp + 25 hours + 61);
 
@@ -183,7 +183,7 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // Generate one more fee
         vm.prank(alice);
-        monstr.transfer(bob, 200 ether);
+        monstr.transfer(bob, 0.2 ether);
 
         uint256 totalSupplyBefore = monstr.totalSupply();
         // Max supply might already be set by the transfer above since we're past minting period
@@ -236,7 +236,7 @@ contract StrategyMaxSupplyOrderTest is Test {
         uint256 totalSupplyBefore = monstr.totalSupply();
 
         vm.prank(alice);
-        monstr.transfer(bob, 100 ether);
+        monstr.transfer(bob, 1 ether);
 
         // Max supply should now be set
         uint256 maxSupply = monstr.maxSupplyEver();
@@ -247,6 +247,6 @@ contract StrategyMaxSupplyOrderTest is Test {
         );
 
         // And it should equal the total supply before the transfer's fee
-        assertEq(maxSupply, 10000 ether, "Max supply should be 10,000 MONSTR");
+        assertEq(maxSupply, 10 ether, "Max supply should be 10 MONSTR");
     }
 }

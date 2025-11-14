@@ -47,17 +47,17 @@ contract StrategyAuctionTest is WMONTestBase {
         // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        bool success = monstr.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
         assertTrue(success, "Transfer should succeed");
         assertEq(
             monstr.balanceOf(alice),
-            aliceBalanceBefore - 1000 ether,
-            "Alice balance should decrease by 1000"
+            aliceBalanceBefore - 1 ether,
+            "Alice balance should decrease by 1"
         );
         assertEq(
             monstr.balanceOf(bob),
-            990 ether,
-            "Bob should receive 990 (1000 - 10 fee)"
+            0.99 ether,
+            "Bob should receive 0.99 (1 - 0.01 fee)"
         );
 
         // Execute lottery/auction
@@ -97,17 +97,17 @@ contract StrategyAuctionTest is WMONTestBase {
         // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
+        bool success = monstr.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
         assertTrue(success, "Transfer should succeed");
         assertEq(
             monstr.balanceOf(alice),
-            aliceBalanceBefore - 1000 ether,
-            "Alice balance should decrease by 1000"
+            aliceBalanceBefore - 1 ether,
+            "Alice balance should decrease by 1"
         );
         assertEq(
             monstr.balanceOf(bob),
-            990 ether,
-            "Bob should receive 990 (1000 - 10 fee)"
+            0.99 ether,
+            "Bob should receive 0.99 (1 - 0.01 fee)"
         );
 
         // Execute lottery/auction
@@ -126,7 +126,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Generate fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
-        monstr.transfer(alice, 500 ether); // Generate 5 token fee
+        monstr.transfer(alice, 0.5 ether); // Generate 0.005 token fee
 
         // Finalize auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
@@ -147,7 +147,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         monstr.executeLottery();
@@ -182,7 +182,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1 ether);
 
         // Day 8 - Start auction but don't bid (distributes day 7's fees)
         vm.warp(block.timestamp + 25 hours + 1 minutes);
@@ -190,7 +190,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Generate more fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
-        monstr.transfer(alice, 500 ether); // Generate 5 token fee
+        monstr.transfer(alice, 0.5 ether); // Generate 0.005 token fee
 
         // Get FEES_POOL balance before rollover
         uint256 feesPoolBefore = monstr.balanceOf(monstr.FEES_POOL());
@@ -223,20 +223,20 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.warp(block.timestamp + 8 * 25 hours);
 
         // Alice has 99 tokens
-        // Transfer 10,000 tokens (generates 100 token fee)
+        // Transfer 10 tokens (generates 0.1 token fee)
         vm.prank(alice);
-        monstr.transfer(bob, 10_000 ether);
-        // Bob got 9,900 tokens (10,000 - 100 fee), transfers some back
+        monstr.transfer(bob, 10 ether);
+        // Bob got 9.9 tokens (10 - 0.1 fee), transfers some back
         vm.prank(bob);
-        monstr.transfer(alice, 9_000 ether); // generates 90 token fee
+        monstr.transfer(alice, 9 ether); // generates 0.09 token fee
 
         // Check FEES_POOL balance for accumulated fees
         uint256 totalFees = monstr.balanceOf(monstr.FEES_POOL());
-        // We expect accumulated fees: 1000 (from minting) + 100 + 90 = 1190 ether
+        // We expect accumulated fees: 1 (from minting) + 0.1 + 0.09 = 1.19 ether
         assertEq(
             totalFees,
-            1190 ether,
-            "FEES_POOL should have 1190 tokens in fees"
+            1.19 ether,
+            "FEES_POOL should have 1.19 tokens in fees"
         );
 
         // Execute lottery/auction for the day's fees
@@ -245,9 +245,9 @@ contract StrategyAuctionTest is WMONTestBase {
         // We generated fees on day 8, so we execute on day 9 to distribute day 8's fees
         monstr.executeLottery();
 
-        // Verify auction has half the fees (595 tokens)
+        // Verify auction has half the fees (0.595 tokens)
         (, , , uint112 auctionAmount, ) = monstr.currentAuction();
-        assertEq(auctionAmount, 595 ether, "Auction should have 595 tokens");
+        assertEq(auctionAmount, 0.595 ether, "Auction should have 0.595 tokens");
     }
 
     function testMinimumBidCalculation() public {
@@ -262,12 +262,12 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Total supply: 9.9 + 0.1 + 4.95 + 0.05 = 15 MONSTR
         // MON balance: 15 MON
-        uint256 expectedTotalSupply = 15000 ether;
+        uint256 expectedTotalSupply = 15 ether;
         uint256 monBalance = 15 ether;
         assertEq(
             monstr.totalSupply(),
             expectedTotalSupply,
-            "Total supply should be 15000 MONSTR"
+            "Total supply should be 15 MONSTR"
         );
         assertEq(
             address(monstr).balance,
@@ -280,7 +280,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Generate specific amount of fees for auction
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether); // 10 MONSTR fee
+        monstr.transfer(bob, 1 ether); // 0.01 MONSTR fee
 
         // Execute to start auction - fees will be split 50/50 between lottery and auction
         vm.warp(block.timestamp + 25 hours + 61);
@@ -289,15 +289,15 @@ contract StrategyAuctionTest is WMONTestBase {
         // Get auction details
         (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
 
-        // After transfer: 10 MONSTR fee generated
-        // Split 50/50: 5 MONSTR for lottery, 5 MONSTR for auction
-        assertEq(auctionAmount, 5 ether, "Auction should be for 5 MONSTR");
+        // After transfer: 0.01 MONSTR fee generated
+        // Split 50/50: 0.005 MONSTR for lottery, 0.005 MONSTR for auction
+        assertEq(auctionAmount, 0.005 ether, "Auction should be for 0.005 MONSTR");
 
         // Calculate expected minimum bid with new formula
         // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
-        // = (15 MON * 5 MONSTR) / (2 * 15 MONSTR)
-        // = 75 / 30 MON
-        // = 2.5 MON
+        // = (15 MON * 0.005 MONSTR) / (2 * 15 MONSTR)
+        // = 0.075 / 30 MON
+        // = 0.0025 MON
 
         uint256 expectedMinBid = (monBalance * auctionAmount) /
             (2 * expectedTotalSupply);
@@ -307,7 +307,7 @@ contract StrategyAuctionTest is WMONTestBase {
             expectedMinBid,
             "Minimum bid should match calculated value"
         );
-        assertEq(minBid, 2.5 ether, "Minimum bid should be 2.5 MON");
+        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 MON");
 
         // Verify that bidding exactly the minimum bid works
         getWMONAndApprove(alice, address(monstr), minBid);
@@ -343,7 +343,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Generate fees
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether); // 10 MONSTR fee
+        monstr.transfer(bob, 1 ether); // 10 MONSTR fee
 
         // Start auction
         vm.warp(block.timestamp + 25 hours + 61);
@@ -373,7 +373,7 @@ contract StrategyAuctionTest is WMONTestBase {
 
         // Generate new fees
         vm.prank(alice);
-        monstr.transfer(bob, 500 ether);
+        monstr.transfer(bob, 0.5 ether);
 
         // Start new auction
         vm.warp(block.timestamp + 25 hours + 61);
@@ -410,10 +410,10 @@ contract StrategyAuctionTest is WMONTestBase {
 
         vm.warp(block.timestamp + 8 days);
 
-        // Generate an odd fee amount: 7 MONSTR
-        // After split: 3.5 MONSTR for auction
+        // Generate an odd fee amount: 0.007 MONSTR
+        // After split: 0.0035 MONSTR for auction
         vm.prank(alice);
-        monstr.transfer(bob, 700 ether); // 7 MONSTR fee
+        monstr.transfer(bob, 0.7 ether); // 0.007 MONSTR fee
 
         vm.warp(block.timestamp + 25 hours + 61);
         monstr.executeLottery();
@@ -423,13 +423,13 @@ contract StrategyAuctionTest is WMONTestBase {
         uint256 monBalance = address(monstr).balance;
         uint256 totalSupply = monstr.totalSupply();
 
-        // The auction should have 3.5 MONSTR (half of 7)
-        assertEq(auctionAmount, 3.5 ether, "Auction should have 3.5 MONSTR");
+        // The auction should have 0.0035 MONSTR (half of 0.007)
+        assertEq(auctionAmount, 0.0035 ether, "Auction should have 0.0035 MONSTR");
 
         // Calculate with new formula
         // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
-        // = (3 MON * 3.5 MONSTR) / (2 * 3 MONSTR)
-        // = 10.5 / 6 = 1.75 MON
+        // = (3 MON * 0.0035 MONSTR) / (2 * 3 MONSTR)
+        // = 0.0105 / 6 = 0.00175 MON
         uint256 expectedMinBid = (monBalance * auctionAmount) /
             (2 * totalSupply);
 
@@ -483,7 +483,7 @@ contract StrategyAuctionSecurityTest is WMONTestBase {
 
         vm.warp(block.timestamp + 8 days + 1 hours);
         vm.prank(alice);
-        monstr.transfer(address(0x99), 1000 ether);
+        monstr.transfer(address(0x99), 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         monstr.executeLottery();

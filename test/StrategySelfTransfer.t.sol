@@ -144,13 +144,13 @@ contract StrategySelfTransferTest is Test {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        uint256 expectedBalance = 9900 ether;
+        uint256 expectedBalance = 9.9 ether;
 
         // Do 10 self-transfers rapidly
         for (uint256 i = 0; i < 10; i++) {
             vm.prank(alice);
-            monstr.transfer(alice, 100 ether);
-            expectedBalance -= 1 ether; // 1% fee each time
+            monstr.transfer(alice, 0.9 ether);
+            expectedBalance -= 0.009 ether; // 1% fee each time
 
             // Check Fenwick consistency after each transfer
             uint256 fenwick = monstr.getSuffixSum(1);
@@ -173,8 +173,8 @@ contract StrategySelfTransferTest is Test {
         uint256 aliceBalance = monstr.balanceOf(alice);
         uint256 feesBalance = monstr.balanceOf(monstr.FEES_POOL());
 
-        assertEq(aliceBalance, 9900 ether, "Alice should have 9900");
-        assertEq(feesBalance, 100 ether, "FEES_POOL should have 100");
+        assertEq(aliceBalance, 9.9 ether, "Alice should have 9.9");
+        assertEq(feesBalance, 0.1 ether, "FEES_POOL should have 0.1");
 
         // Fenwick should only track Alice, not FEES_POOL
         uint256 fenwick = monstr.getSuffixSum(1);
@@ -182,7 +182,7 @@ contract StrategySelfTransferTest is Test {
 
         // Do a transfer to generate more fees
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1 ether);
 
         // Check that Fenwick still only tracks real holders
         uint256 totalHolderBalance = monstr.balanceOf(alice) +

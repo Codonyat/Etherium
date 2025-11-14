@@ -64,13 +64,13 @@ contract StrategyFenwickTest is StrategyTestBase {
     function testFenwickTreeCumulativeSums() public {
         // Add holders with known balances
         vm.prank(alice);
-        monstr.mint{value: 1 ether}(); // 990 tokens
+        monstr.mint{value: 1 ether}(); // 0.99 tokens
 
         vm.prank(bob);
-        monstr.mint{value: 2 ether}(); // 1980 tokens
+        monstr.mint{value: 2 ether}(); // 1.98 tokens
 
         vm.prank(charlie);
-        monstr.mint{value: 3 ether}(); // 2970 tokens
+        monstr.mint{value: 3 ether}(); // 2.97 tokens
 
         // getSuffixSum returns cumulative sum from index to end
         // So getSuffixSum(1) returns total of all holders
@@ -78,18 +78,18 @@ contract StrategyFenwickTest is StrategyTestBase {
         uint256 cumSum2 = monstr.getSuffixSum(2);
         uint256 cumSum3 = monstr.getSuffixSum(3);
 
-        // Total should be 990 + 1980 + 2970 = 5940
+        // Total should be 0.99 + 1.98 + 2.97 = 5.94
         assertEq(
             cumSum1,
-            5940 ether,
-            "Suffix sum from index 1 should be total (5940)"
+            5.94 ether,
+            "Suffix sum from index 1 should be total (5.94)"
         );
         assertEq(
             cumSum2,
-            1980 ether + 2970 ether,
-            "Suffix sum from index 2 should be 4950"
+            1.98 ether + 2.97 ether,
+            "Suffix sum from index 2 should be 4.95"
         );
-        assertEq(cumSum3, 2970 ether, "Suffix sum from index 3 should be 2970");
+        assertEq(cumSum3, 2.97 ether, "Suffix sum from index 3 should be 2.97");
     }
 
     function testFenwickTreeConsistencyAfterOperations() public {
@@ -102,10 +102,10 @@ contract StrategyFenwickTest is StrategyTestBase {
 
         // Perform various operations
         vm.prank(alice);
-        monstr.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1 ether);
 
         vm.prank(bob);
-        monstr.transfer(charlie, 500 ether);
+        monstr.transfer(charlie, 0.5 ether);
 
         // Add new holder
         vm.prank(david);

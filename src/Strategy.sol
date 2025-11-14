@@ -194,7 +194,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Mint MONSTR by depositing MON (standard minting with fees)
-     * During minting period: 1 MON = 1000 MONSTR
+     * During minting period: 1 MON = 1 MONSTR
      * After minting period: Can only mint up to available capacity
      */
     function mint() external payable nonReentrant {
