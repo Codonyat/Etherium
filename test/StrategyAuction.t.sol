@@ -36,7 +36,7 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.deal(david, 100 ether);
     }
 
-    function testAuctionWithWETHBidding() public {
+    function testAuctionWithWMONBidding() public {
         // Generate fees during minting period
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -44,7 +44,7 @@ contract StrategyAuctionTest is WMONTestBase {
         // Fast forward past minting period
         vm.warp(block.timestamp + 8 days + 1 hours);
 
-        // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
+        // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
         vm.prank(alice);
         bool success = monstr.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
@@ -67,7 +67,7 @@ contract StrategyAuctionTest is WMONTestBase {
         // Get auction details
         (, , uint96 minBid, , ) = monstr.currentAuction();
 
-        // Alice bids with WETH
+        // Alice bids with WMON
         getWMONAndApprove(alice, address(monstr), 1 ether);
         vm.prank(alice);
         monstr.bid(minBid);
@@ -78,7 +78,7 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(bob);
         monstr.bid(newBid);
 
-        // Verify Alice got refunded in WETH
+        // Verify Alice got refunded in WMON
         assertEq(wmon.balanceOf(alice), 1 ether, "Alice should be refunded");
 
         // Verify Bob is current bidder
@@ -86,7 +86,7 @@ contract StrategyAuctionTest is WMONTestBase {
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testAuctionFinalizationConvertsWETHToETH() public {
+    function testAuctionFinalizationConvertsWMONToMON() public {
         // Generate fees
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -94,7 +94,7 @@ contract StrategyAuctionTest is WMONTestBase {
         // Fast forward past minting period
         vm.warp(block.timestamp + 8 days + 1 hours);
 
-        // Generate fees via transfer (alice has 9,900 tokens from 10 ETH mint with 1000:1 ratio)
+        // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
         vm.prank(alice);
         bool success = monstr.transfer(bob, 1000 ether); // Transfer 1000 tokens, 10 token fee
@@ -120,9 +120,9 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.bid(minBid);
 
-        uint256 contractETHBefore = address(monstr).balance;
-        uint256 contractWETHBefore = wmon.balanceOf(address(monstr));
-        assertEq(contractWETHBefore, minBid, "Contract should hold WETH");
+        uint256 contractMONBefore = address(monstr).balance;
+        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
+        assertEq(contractWMONBefore, minBid, "Contract should hold WMON");
 
         // Generate fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
@@ -132,12 +132,12 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         monstr.executeLottery();
 
-        // Verify WETH was converted to ETH
-        uint256 contractWETHAfter = wmon.balanceOf(address(monstr));
+        // Verify WMON was converted to MON
+        uint256 contractWMONAfter = wmon.balanceOf(address(monstr));
 
-        assertEq(contractWETHAfter, 0, "Contract should have no WETH");
-        // The important thing is that WETH was successfully withdrawn and converted to ETH
-        // The ETH balance may change due to public goods funding, but WETH should be zero
+        assertEq(contractWMONAfter, 0, "Contract should have no WMON");
+        // The important thing is that WMON was successfully withdrawn and converted to MON
+        // The MON balance may change due to beneficiary funding, but WMON should be zero
     }
 
     function testBidIncrementRequirement() public {
@@ -214,15 +214,15 @@ contract StrategyAuctionTest is WMONTestBase {
 
     function test50_50FeeSplitAfterMintingPeriod() public {
         // Generate tokens during minting
-        // 100 ETH = 100,000 MONSTR tokens before fee
+        // 100 MON = 100 MONSTR tokens before fee
         vm.prank(alice);
-        monstr.mint{value: 100 ether}(); // Alice gets 99,000 tokens after 1% fee
-        // During minting period, 1% fee is minted as tokens: 100 ETH * 1000 ratio * 1% = 1000 tokens
+        monstr.mint{value: 100 ether}(); // Alice gets 99 tokens after 1% fee
+        // During minting period, 1% fee is minted as tokens: 100 MON * 1:1 ratio * 1% = 1 token
 
         // After minting period (day 8 = 8 * 25 hours from start)
         vm.warp(block.timestamp + 8 * 25 hours);
 
-        // Alice has 99,000 tokens
+        // Alice has 99 tokens
         // Transfer 10,000 tokens (generates 100 token fee)
         vm.prank(alice);
         monstr.transfer(bob, 10_000 ether);
@@ -252,18 +252,18 @@ contract StrategyAuctionTest is WMONTestBase {
 
     function testMinimumBidCalculation() public {
         // Test that minimum bid is calculated correctly
-        // New Formula: MinBid = (ETH balance * feesToDistribute) / (2 * totalSupply)
+        // New Formula: MinBid = (MON balance * feesToDistribute) / (2 * totalSupply)
 
-        // Setup: Create known ETH balance and total supply
+        // Setup: Create known MON balance and total supply
         vm.prank(alice);
-        monstr.mint{value: 10 ether}(); // 9900 MONSTR to alice, 100 to fees
+        monstr.mint{value: 10 ether}(); // 9.9 MONSTR to alice, 0.1 to fees
         vm.prank(bob);
-        monstr.mint{value: 5 ether}(); // 4950 MONSTR to bob, 50 to fees
+        monstr.mint{value: 5 ether}(); // 4.95 MONSTR to bob, 0.05 to fees
 
-        // Total supply: 9900 + 100 + 4950 + 50 = 15000 MONSTR
-        // ETH balance: 15 ETH
+        // Total supply: 9.9 + 0.1 + 4.95 + 0.05 = 15 MONSTR
+        // MON balance: 15 MON
         uint256 expectedTotalSupply = 15000 ether;
-        uint256 ethBalance = 15 ether;
+        uint256 monBalance = 15 ether;
         assertEq(
             monstr.totalSupply(),
             expectedTotalSupply,
@@ -271,8 +271,8 @@ contract StrategyAuctionTest is WMONTestBase {
         );
         assertEq(
             address(monstr).balance,
-            ethBalance,
-            "Contract should have 15 ETH"
+            monBalance,
+            "Contract should have 15 MON"
         );
 
         // Move past minting period
@@ -294,12 +294,12 @@ contract StrategyAuctionTest is WMONTestBase {
         assertEq(auctionAmount, 5 ether, "Auction should be for 5 MONSTR");
 
         // Calculate expected minimum bid with new formula
-        // MinBid = (ethBalance * auctionAmount) / (2 * totalSupply)
-        // = (15 ETH * 5 MONSTR) / (2 * 15000 MONSTR)
-        // = 75 / 30000 ETH
-        // = 0.0025 ETH = 2500000000000000 wei
+        // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
+        // = (15 MON * 5 MONSTR) / (2 * 15 MONSTR)
+        // = 75 / 30 MON
+        // = 2.5 MON
 
-        uint256 expectedMinBid = (ethBalance * auctionAmount) /
+        uint256 expectedMinBid = (monBalance * auctionAmount) /
             (2 * expectedTotalSupply);
 
         assertEq(
@@ -307,7 +307,7 @@ contract StrategyAuctionTest is WMONTestBase {
             expectedMinBid,
             "Minimum bid should match calculated value"
         );
-        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 ETH");
+        assertEq(minBid, 2.5 ether, "Minimum bid should be 2.5 MON");
 
         // Verify that bidding exactly the minimum bid works
         getWMONAndApprove(alice, address(monstr), minBid);
@@ -327,16 +327,16 @@ contract StrategyAuctionTest is WMONTestBase {
     }
 
     function testMinimumBidWithDifferentBalances() public {
-        // Test minimum bid calculation with various ETH balances and fee amounts
+        // Test minimum bid calculation with various MON balances and fee amounts
 
-        // Scenario 1: Low ETH balance, high supply (deflated token)
+        // Scenario 1: Low MON balance, high supply (deflated token)
         vm.prank(alice);
-        monstr.mint{value: 100 ether}(); // 99000 MONSTR
+        monstr.mint{value: 100 ether}(); // 99 MONSTR
 
         // Burn most tokens to simulate deflation
         vm.warp(block.timestamp + 8 days);
         vm.prank(alice);
-        monstr.redeem(90000 ether); // Burns 89100 MONSTR, returns ~89.1 ETH
+        monstr.redeem(90 ether); // Burns 89.1 MONSTR, returns ~89.1 MON
 
         uint256 remainingSupply = monstr.totalSupply();
         uint256 remainingETH = address(monstr).balance;
@@ -353,7 +353,7 @@ contract StrategyAuctionTest is WMONTestBase {
             .currentAuction();
 
         // Verify minimum bid with new formula
-        // MinBid = (ETH balance * auctionAmount) / (2 * totalSupply)
+        // MinBid = (MON balance * auctionAmount) / (2 * totalSupply)
         uint256 expectedMin1 = (remainingETH * auctionAmount1) /
             (2 * remainingSupply);
         assertEq(
@@ -362,14 +362,14 @@ contract StrategyAuctionTest is WMONTestBase {
             "Min bid should match expected calculation"
         );
 
-        // Scenario 2: High ETH balance from donations
+        // Scenario 2: High MON balance from donations
         // Reset with new deployment for clean state
         vm.warp(block.timestamp + 30 days); // Clear any time dependencies
 
-        // Someone donates ETH to increase backing
+        // Someone donates MON to increase backing
         vm.deal(address(this), 50 ether);
         (bool sent, ) = address(monstr).call{value: 50 ether}("");
-        assertTrue(sent, "ETH donation should succeed");
+        assertTrue(sent, "MON donation should succeed");
 
         // Generate new fees
         vm.prank(alice);
@@ -390,23 +390,23 @@ contract StrategyAuctionTest is WMONTestBase {
         assertEq(
             minBid2,
             expectedMin2,
-            "Min bid should reflect increased ETH backing"
+            "Min bid should reflect increased MON backing"
         );
 
         // The minimum bid should be higher due to the donation increasing the backing value
         assertTrue(
             minBid2 > minBid1,
-            "Higher ETH backing should result in higher min bid"
+            "Higher MON backing should result in higher min bid"
         );
     }
 
     function testMinimumBidFormula() public {
         // Test that minimum bid uses the correct formula
-        // Formula: MinBid = (ETH balance * auctionAmount) / (2 * totalSupply)
+        // Formula: MinBid = (MON balance * auctionAmount) / (2 * totalSupply)
 
-        // Using 3 ETH to create 3000 MONSTR total supply
+        // Using 3 MON to create 3 MONSTR total supply
         vm.prank(alice);
-        monstr.mint{value: 3 ether}(); // 2970 MONSTR to alice, 30 to fees
+        monstr.mint{value: 3 ether}(); // 2.97 MONSTR to alice, 0.03 to fees
 
         vm.warp(block.timestamp + 8 days);
 
@@ -420,17 +420,17 @@ contract StrategyAuctionTest is WMONTestBase {
 
         (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
 
-        uint256 ethBalance = address(monstr).balance;
+        uint256 monBalance = address(monstr).balance;
         uint256 totalSupply = monstr.totalSupply();
 
         // The auction should have 3.5 MONSTR (half of 7)
         assertEq(auctionAmount, 3.5 ether, "Auction should have 3.5 MONSTR");
 
         // Calculate with new formula
-        // MinBid = (ethBalance * auctionAmount) / (2 * totalSupply)
-        // = (3 ETH * 3.5 MONSTR) / (2 * 3000 MONSTR)
-        // = 10.5 / 6000 = 0.00175 ETH
-        uint256 expectedMinBid = (ethBalance * auctionAmount) /
+        // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
+        // = (3 MON * 3.5 MONSTR) / (2 * 3 MONSTR)
+        // = 10.5 / 6 = 1.75 MON
+        uint256 expectedMinBid = (monBalance * auctionAmount) /
             (2 * totalSupply);
 
         assertEq(
@@ -440,7 +440,7 @@ contract StrategyAuctionTest is WMONTestBase {
         );
 
         // The minimum bid is now half of the redemption value
-        uint256 redemptionValue = (auctionAmount * ethBalance) / totalSupply;
+        uint256 redemptionValue = (auctionAmount * monBalance) / totalSupply;
         assertEq(
             minBid,
             redemptionValue / 2,
@@ -495,17 +495,17 @@ contract StrategyAuctionSecurityTest is WMONTestBase {
         vm.prank(maliciousBidder);
         monstr.bid(minBid);
 
-        // Alice can still outbid even though malicious bidder reverts on ETH
+        // Alice can still outbid even though malicious bidder reverts on MON
         uint256 newBid = (minBid * 110) / 100;
         getWMONAndApprove(alice, address(monstr), 1 ether);
         vm.prank(alice);
-        monstr.bid(newBid); // This would fail with ETH but succeeds with WETH
+        monstr.bid(newBid); // This would fail with MON but succeeds with WMON
 
-        // Verify malicious bidder got WETH refund
+        // Verify malicious bidder got WMON refund
         assertEq(
             wmon.balanceOf(maliciousBidder),
             1 ether,
-            "Should receive WETH refund"
+            "Should receive WMON refund"
         );
 
         (address currentBidder, , , , ) = monstr.currentAuction();

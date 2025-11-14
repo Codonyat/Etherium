@@ -57,7 +57,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        require(success, "MON transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -213,7 +213,7 @@ contract StrategyFenwickCorruptionTest is Test {
     
     function testContractExclusionStillWorksNormally() public {
         // Normal case: deploy contract first, then try to mint
-        // First deploy with no ETH in constructor
+        // First deploy with no MON in constructor
         ConstructorMinter normalContract = new ConstructorMinter{value: 0}(monstr);
         
         // Contract tries to mint after deployment (not in constructor)

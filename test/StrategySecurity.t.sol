@@ -17,7 +17,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        require(success, "MON transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -67,7 +67,7 @@ contract StrategySecurityTest is Test {
 
     // ============ Zero Amount Operations ============
 
-    function testMintZeroETH() public {
+    function testMintZeroMON() public {
         vm.prank(alice);
         vm.expectRevert("Must send MON");
         monstr.mint{value: 0}();
@@ -113,7 +113,7 @@ contract StrategySecurityTest is Test {
 
     // ============ Insufficient Balance Tests ============
 
-    function testRedeemWithInsufficientContractETH() public {
+    function testRedeemWithInsufficientContractMON() public {
         // Mint tokens
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -125,9 +125,9 @@ contract StrategySecurityTest is Test {
         vm.prank(alice);
         monstr.redeem(9900 ether);
 
-        // Bob tries to redeem but contract has insufficient ETH
-        // After Alice's redemption: contract has ~10.1 ETH left
-        // Bob tries to redeem 9900 tokens which needs ~9.9 ETH
+        // Bob tries to redeem but contract has insufficient MON
+        // After Alice's redemption: contract has ~10.1 MON left
+        // Bob tries to redeem 9900 tokens which needs ~9.9 MON
         // Should succeed
         vm.prank(bob);
         monstr.redeem(9900 ether);
@@ -139,7 +139,7 @@ contract StrategySecurityTest is Test {
     // ============ Max Supply Tests ============
 
     function testMaxSupplyEnforcement() public {
-        // Mint during minting period (100 ETH = 100,000 MONSTR total, alice gets 99,000 after 1% fee)
+        // Mint during minting period (100 MON = 100 MONSTR total, alice gets 99 after 1% fee)
         vm.prank(alice);
         monstr.mint{value: 100 ether}();
 
@@ -233,14 +233,14 @@ contract StrategySecurityTest is Test {
         assertEq(monstr.balanceOf(monstr.FEES_POOL()), expectedFee, "Fee should be correct");
     }
 
-    // ============ Public Goods Tests ============
+    // ============ Beneficiary Tests ============
 
-    function testUnclaimedPrizeToPublicGoods() public {
-        // Create a rejecting public good
-        RejectingReceiver rejectingPublicGood = new RejectingReceiver();
+    function testUnclaimedPrizeToBeneficiaries() public {
+        // Create a rejecting beneficiary
+        RejectingReceiver rejectingBeneficiary = new RejectingReceiver();
 
-        // We can't change public goods array, but we can test the fallback behavior
-        // When public good rejects, prize should go to current winner
+        // We can't change beneficiaries array, but we can test the fallback behavior
+        // When beneficiary rejects, prize should go to current winner
 
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -283,12 +283,12 @@ contract StrategySecurityTest is Test {
         (address checkWinner,) = monstr.lotteryUnclaimedPrizes(9 % 7);
         uint256 slotToOverwrite = (winner1 == checkWinner) ? 9 % 7 : 8 % 7;
 
-        // Get the first public good address to track its balance
-        address firstPublicGood = monstr.PUBLIC_GOODS(0);
-        uint256 publicGoodBalanceBefore = firstPublicGood.balance;
-        
+        // Get the first beneficiary address to track its balance
+        address firstBeneficiary = monstr.BENEFICIARIES(0);
+        uint256 beneficiaryBalanceBefore = firstBeneficiary.balance;
+
         // Fast forward 7 days to overwrite the slot with unclaimed prize
-        // This will trigger the public goods funding
+        // This will trigger the beneficiary funding
         for (uint256 i = 0; i < 7; i++) {
             // Generate fees for the current day
             vm.prank(alice);
@@ -298,25 +298,25 @@ contract StrategySecurityTest is Test {
             vm.warp(block.timestamp + 25 hours + 61);
             monstr.executeLottery();
         }
-        
-        // Check if public good received ETH
-        uint256 publicGoodBalanceAfter = firstPublicGood.balance;
-        uint256 ethSent = publicGoodBalanceAfter - publicGoodBalanceBefore;
-        
-        // CRITICAL: The public good should receive ETH equal to the backing value of the MONSTR prize
-        // The correct conversion should be: ethAmount = (monstrAmount * contractETHBalance) / totalSupply
-        
+
+        // Check if beneficiary received MON
+        uint256 beneficiaryBalanceAfter = firstBeneficiary.balance;
+        uint256 monSent = beneficiaryBalanceAfter - beneficiaryBalanceBefore;
+
+        // CRITICAL: The beneficiary should receive MON equal to the backing value of the MONSTR prize
+        // The correct conversion should be: monAmount = (monstrAmount * contractMONBalance) / totalSupply
+
         // Log the values for debugging
         console.log("Unclaimed MONSTR prize:", unclaimedPrizeAmount);
-        console.log("Actual ETH sent:", ethSent);
-        
-        // The bug has been fixed! Now the contract correctly converts MONSTR to ETH
+        console.log("Actual MON sent:", monSent);
+
+        // The bug has been fixed! Now the contract correctly converts MONSTR to MON
         // The exact amount depends on when the conversion happens (contract balance and supply change over time)
-        // But it should be much less than the MONSTR amount (roughly 1000x less during minting period)
-        
-        // Verify that ETH was sent and it's a reasonable amount (not the full MONSTR amount)
-        assertTrue(ethSent > 0, "Should have sent some ETH to public good");
-        assertTrue(ethSent < unclaimedPrizeAmount / 100, "ETH sent should be much less than MONSTR amount (proper conversion)");
+        // But it should be exactly proportional to the backing ratio
+
+        // Verify that MON was sent and it's a reasonable amount (not the full MONSTR amount)
+        assertTrue(monSent > 0, "Should have sent some MON to beneficiary");
+        assertTrue(monSent < unclaimedPrizeAmount, "MON sent should be based on proper MONSTR/MON conversion");
     }
 
     // ============ Fenwick Tree Consistency ============
@@ -359,6 +359,6 @@ contract StrategySecurityTest is Test {
 // Helper contracts
 contract RejectingReceiver {
     receive() external payable {
-        revert("I reject ETH!");
+        revert("I reject MON!");
     }
 }

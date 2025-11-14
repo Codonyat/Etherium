@@ -16,8 +16,8 @@ contract MockWMON {
     function withdraw(uint256 amount) external {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
-        (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "MON transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -32,9 +32,16 @@ contract MockWMON {
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
@@ -57,7 +64,11 @@ contract StrategyMaxSupplyOrderTest is Test {
     address public charlie = address(0x3);
 
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
-    event PublicGoodsFunded(address indexed publicGood, uint256 amount, address previousWinner);
+    event BeneficiaryFunded(
+        address indexed beneficiary,
+        uint256 amount,
+        address previousWinner
+    );
 
     function setUp() public {
         wmon = new MockWMON();
@@ -79,9 +90,13 @@ contract StrategyMaxSupplyOrderTest is Test {
         vm.prank(charlie);
         monstr.mint{value: 20 ether}();
 
-        // Total supply after minting: 100 ETH * 1000 = 100,000 MONSTR
+        // Total supply after minting: 100 MON * 1:1 = 100 MONSTR
         uint256 totalSupplyAtEndOfMinting = monstr.totalSupply();
-        assertEq(totalSupplyAtEndOfMinting, 100_000 ether, "Total supply should be 100,000 MONSTR");
+        assertEq(
+            totalSupplyAtEndOfMinting,
+            100_000 ether,
+            "Total supply should be 100,000 MONSTR"
+        );
 
         // Move past minting period
         vm.warp(monstr.mintingEndTime() + 1);
@@ -92,29 +107,45 @@ contract StrategyMaxSupplyOrderTest is Test {
         // The first transaction after minting period will set max supply
         // This happens BEFORE any lottery execution or potential burns
         uint256 totalSupplyBeforeFirstTx = monstr.totalSupply();
-        
+
         // First transaction after minting period - a simple transfer
         vm.prank(alice);
         monstr.transfer(bob, 100 ether);
-        
+
         // Max supply should now be set to the total supply BEFORE the transfer
         uint256 maxSupplyEver = monstr.maxSupplyEver();
-        assertEq(maxSupplyEver, totalSupplyBeforeFirstTx, "Max supply should be set to initial total");
-        assertEq(maxSupplyEver, 100_000 ether, "Max supply should be 100,000 MONSTR");
-        
+        assertEq(
+            maxSupplyEver,
+            totalSupplyBeforeFirstTx,
+            "Max supply should be set to initial total"
+        );
+        assertEq(
+            maxSupplyEver,
+            100_000 ether,
+            "Max supply should be 100,000 MONSTR"
+        );
+
         // Current supply is actually MORE than max due to transfer fee being added to FEES_POOL
         // After minting period, fees are taken from sender, not minted
         uint256 currentSupply = monstr.totalSupply();
-        assertEq(currentSupply, maxSupplyEver, "Supply unchanged - fees just moved between accounts");
-        
+        assertEq(
+            currentSupply,
+            maxSupplyEver,
+            "Supply unchanged - fees just moved between accounts"
+        );
+
         // Verify max supply never changes
         vm.prank(bob);
         monstr.transfer(charlie, 200 ether);
-        
-        assertEq(monstr.maxSupplyEver(), maxSupplyEver, "Max supply should never change once set");
+
+        assertEq(
+            monstr.maxSupplyEver(),
+            maxSupplyEver,
+            "Max supply should never change once set"
+        );
     }
 
-    function testMaxSupplyWithImmediatePublicGoodsBurn() public {
+    function testMaxSupplyWithImmediateBeneficiaryBurn() public {
         // Setup: Create holders and ensure we'll have an unclaimed prize
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -135,9 +166,9 @@ contract StrategyMaxSupplyOrderTest is Test {
         for (uint256 i = 0; i < 7; i++) {
             vm.prank(bob);
             monstr.transfer(alice, 100 ether);
-            
+
             vm.warp(block.timestamp + 25 hours + 61);
-            
+
             // Skip executing lottery until we're past minting period
             if (block.timestamp <= monstr.mintingEndTime()) {
                 monstr.executeLottery();
@@ -145,8 +176,11 @@ contract StrategyMaxSupplyOrderTest is Test {
         }
 
         // Now we're past minting period with an unclaimed prize
-        assertTrue(block.timestamp > monstr.mintingEndTime(), "Should be past minting period");
-        
+        assertTrue(
+            block.timestamp > monstr.mintingEndTime(),
+            "Should be past minting period"
+        );
+
         // Generate one more fee
         vm.prank(alice);
         monstr.transfer(bob, 200 ether);
@@ -168,16 +202,23 @@ contract StrategyMaxSupplyOrderTest is Test {
         assertTrue(maxSupply > 0, "Max supply should be set");
         if (maxSupplyBefore == 0) {
             // If it wasn't set before, it should equal the supply BEFORE any burns
-            assertEq(maxSupply, totalSupplyBefore, "Max supply should be set before burns");
+            assertEq(
+                maxSupply,
+                totalSupplyBefore,
+                "Max supply should be set before burns"
+            );
         } else {
             // If already set, it shouldn't change
             assertEq(maxSupply, maxSupplyBefore, "Max supply shouldn't change");
         }
-        
+
         // If burns happened, total supply would be less than max supply
         if (totalSupplyAfter < totalSupplyBefore) {
             console.log("Tokens were burned for public goods");
-            assertTrue(totalSupplyAfter < maxSupply, "Current supply should be less than max after burns");
+            assertTrue(
+                totalSupplyAfter < maxSupply,
+                "Current supply should be less than max after burns"
+            );
         }
     }
 
@@ -193,14 +234,18 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // A simple transfer should set max supply before executing lottery
         uint256 totalSupplyBefore = monstr.totalSupply();
-        
+
         vm.prank(alice);
         monstr.transfer(bob, 100 ether);
 
         // Max supply should now be set
         uint256 maxSupply = monstr.maxSupplyEver();
-        assertEq(maxSupply, totalSupplyBefore, "Max supply should be set by transfer");
-        
+        assertEq(
+            maxSupply,
+            totalSupplyBefore,
+            "Max supply should be set by transfer"
+        );
+
         // And it should equal the total supply before the transfer's fee
         assertEq(maxSupply, 10000 ether, "Max supply should be 10,000 MONSTR");
     }

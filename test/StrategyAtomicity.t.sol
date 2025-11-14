@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {Test, console} from "forge-std/Test.sol";
 import {Strategy, IWMON} from "../src/Strategy.sol";
 
-// Mock WETH for this standalone test
+// Mock WMON for this standalone test
 contract MockWMONLocal {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
@@ -16,8 +16,8 @@ contract MockWMONLocal {
     function withdraw(uint256 amount) external {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
-        (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "MON transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -32,9 +32,16 @@ contract MockWMONLocal {
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
@@ -57,8 +64,18 @@ contract StrategyAtomicityTest is Test {
     address public charlie = address(0x3);
 
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event Minted(address indexed to, uint256 ethAmount, uint256 monstrAmount, uint256 fee);
-    event Redeemed(address indexed from, uint256 monstrAmount, uint256 ethAmount, uint256 fee);
+    event Minted(
+        address indexed to,
+        uint256 monAmount,
+        uint256 monstrAmount,
+        uint256 fee
+    );
+    event Redeemed(
+        address indexed from,
+        uint256 monstrAmount,
+        uint256 monAmount,
+        uint256 fee
+    );
 
     function setUp() public {
         wmon = new MockWMONLocal();
@@ -75,44 +92,80 @@ contract StrategyAtomicityTest is Test {
         emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
-        assertEq(monstr.balanceOf(alice), 9900 ether, "Alice should have 9,900 tokens");
+        assertEq(
+            monstr.balanceOf(alice),
+            9900 ether,
+            "Alice should have 9,900 tokens"
+        );
 
         vm.expectEmit(true, true, true, true);
         emit Minted(bob, 5 ether, 4950 ether, 50 ether);
         vm.prank(bob);
         monstr.mint{value: 5 ether}();
-        assertEq(monstr.balanceOf(bob), 4950 ether, "Bob should have 4,950 tokens");
+        assertEq(
+            monstr.balanceOf(bob),
+            4950 ether,
+            "Bob should have 4,950 tokens"
+        );
 
         vm.expectEmit(true, true, true, true);
         emit Minted(charlie, 3 ether, 2970 ether, 30 ether);
         vm.prank(charlie);
         monstr.mint{value: 3 ether}();
-        assertEq(monstr.balanceOf(charlie), 2970 ether, "Charlie should have 2,970 tokens");
+        assertEq(
+            monstr.balanceOf(charlie),
+            2970 ether,
+            "Charlie should have 2,970 tokens"
+        );
 
         // Verify initial Fenwick tree state
         uint256 initialSuffix1 = monstr.getSuffixSum(1);
         uint256 expectedInitialTotal = 9900 ether + 4950 ether + 2970 ether; // 17,820 tokens
-        assertEq(initialSuffix1, expectedInitialTotal, "Initial Fenwick sum should be 17,820 tokens");
+        assertEq(
+            initialSuffix1,
+            expectedInitialTotal,
+            "Initial Fenwick sum should be 17,820 tokens"
+        );
 
         // Perform multiple transfers in same transaction
         vm.startPrank(alice);
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, bob, 99 ether); // 100 - 1% fee = 99
         monstr.transfer(bob, 100 ether);
-        assertEq(monstr.balanceOf(alice), 9800 ether, "Alice should have 9,800 tokens after first transfer");
-        assertEq(monstr.balanceOf(bob), 5049 ether, "Bob should have 5,049 tokens");
-        
+        assertEq(
+            monstr.balanceOf(alice),
+            9800 ether,
+            "Alice should have 9,800 tokens after first transfer"
+        );
+        assertEq(
+            monstr.balanceOf(bob),
+            5049 ether,
+            "Bob should have 5,049 tokens"
+        );
+
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, charlie, 198 ether); // 200 - 1% fee = 198
         monstr.transfer(charlie, 200 ether);
-        assertEq(monstr.balanceOf(alice), 9600 ether, "Alice should have 9,600 tokens after second transfer");
-        assertEq(monstr.balanceOf(charlie), 3168 ether, "Charlie should have 3,168 tokens");
+        assertEq(
+            monstr.balanceOf(alice),
+            9600 ether,
+            "Alice should have 9,600 tokens after second transfer"
+        );
+        assertEq(
+            monstr.balanceOf(charlie),
+            3168 ether,
+            "Charlie should have 3,168 tokens"
+        );
         vm.stopPrank();
 
         // Verify Fenwick tree is still consistent
         uint256 afterSuffix1 = monstr.getSuffixSum(1);
         uint256 expectedAfterTotal = 9600 ether + 5049 ether + 3168 ether; // 17,817 tokens (3 tokens to fees)
-        assertEq(afterSuffix1, expectedAfterTotal, "Fenwick sum should be 17,817 tokens after transfers");
+        assertEq(
+            afterSuffix1,
+            expectedAfterTotal,
+            "Fenwick sum should be 17,817 tokens after transfers"
+        );
     }
 
     function testFenwickTreeAtomicityDuringMintAndBurn() public {
@@ -121,11 +174,19 @@ contract StrategyAtomicityTest is Test {
         emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
-        assertEq(monstr.balanceOf(alice), 9900 ether, "Alice should have 9,900 tokens");
+        assertEq(
+            monstr.balanceOf(alice),
+            9900 ether,
+            "Alice should have 9,900 tokens"
+        );
 
         // Check Fenwick consistency after mint
         uint256 suffix1AfterMint = monstr.getSuffixSum(1);
-        assertEq(suffix1AfterMint, 9900 ether, "Fenwick should be 9,900 after mint");
+        assertEq(
+            suffix1AfterMint,
+            9900 ether,
+            "Fenwick should be 9,900 after mint"
+        );
 
         // Move past minting period to enable redemption
         vm.warp(block.timestamp + 8 days);
@@ -134,40 +195,57 @@ contract StrategyAtomicityTest is Test {
         uint256 redeemAmount = 100 ether;
         uint256 redeemFee = 1 ether; // 1% of 100
         uint256 netRedeemed = 99 ether;
-        uint256 ethReturned = netRedeemed / 1000; // 0.099 ETH
-        
+        uint256 monReturned = netRedeemed / 1000; // 0.099 MON
+
         vm.expectEmit(true, true, true, true);
-        emit Redeemed(alice, redeemAmount, ethReturned, redeemFee);
+        emit Redeemed(alice, redeemAmount, monReturned, redeemFee);
         vm.prank(alice);
         monstr.redeem(redeemAmount);
-        assertEq(monstr.balanceOf(alice), 9800 ether, "Alice should have 9,800 tokens after redeem");
+        assertEq(
+            monstr.balanceOf(alice),
+            9800 ether,
+            "Alice should have 9,800 tokens after redeem"
+        );
 
         // Check Fenwick consistency after redemption
         uint256 suffix1AfterRedeem = monstr.getSuffixSum(1);
-        assertEq(suffix1AfterRedeem, 9800 ether, "Fenwick should be 9,800 after redeem");
+        assertEq(
+            suffix1AfterRedeem,
+            9800 ether,
+            "Fenwick should be 9,800 after redeem"
+        );
 
         // Add another holder - mint slightly more to meet minimum requirement
         // After minting period, there's a minimum mint of 100 wei
-        // 0.0001 ETH will mint ~0.1 tokens (proportional to backing ratio)
+        // 0.0001 MON will mint ~0.1 tokens (proportional to backing ratio)
         // But actually after redemption backing changed, need to calculate properly
-        // Contract has ~9.901 ETH, total supply is 9900 tokens
-        // To mint 100 wei: need (100 * 9.901) / 9900e18 = ~1e-16 ETH
-        // But that's too small, let's mint 0.0001 ETH to get a reasonable amount
-        uint256 mintEth = 0.0001 ether;
-        uint256 expectedTokens = (mintEth * monstr.totalSupply()) / address(monstr).balance;
+        // Contract has ~9.901 MON, total supply is 9900 tokens
+        // To mint 100 wei: need (100 * 9.901) / 9900e18 = ~1e-16 MON
+        // But that's too small, let's mint 0.0001 MON to get a reasonable amount
+        uint256 mintMon = 0.0001 ether;
+        uint256 expectedTokens = (mintMon * monstr.totalSupply()) /
+            address(monstr).balance;
         uint256 expectedFee = expectedTokens / 100;
         uint256 expectedNet = expectedTokens - expectedFee;
-        
+
         vm.expectEmit(true, true, true, true);
-        emit Minted(bob, mintEth, expectedNet, expectedFee);
+        emit Minted(bob, mintMon, expectedNet, expectedFee);
         vm.prank(bob);
-        monstr.mint{value: mintEth}(); // Within capacity after redemption
-        assertEq(monstr.balanceOf(bob), expectedNet, "Bob should have expected tokens");
+        monstr.mint{value: mintMon}(); // Within capacity after redemption
+        assertEq(
+            monstr.balanceOf(bob),
+            expectedNet,
+            "Bob should have expected tokens"
+        );
 
         // Verify both holders are tracked correctly
         uint256 finalSuffix1 = monstr.getSuffixSum(1);
         uint256 expectedFinal = 9800 ether + expectedNet;
-        assertEq(finalSuffix1, expectedFinal, "Fenwick should be 9,889.1 with both holders");
+        assertEq(
+            finalSuffix1,
+            expectedFinal,
+            "Fenwick should be 9,889.1 with both holders"
+        );
     }
 
     function testFenwickTreeAtomicityDuringComplexOperations() public {
@@ -185,7 +263,10 @@ contract StrategyAtomicityTest is Test {
         uint256 fenwickTotal = monstr.getSuffixSum(1);
 
         // Fenwick only tracks user holders, not pools
-        assertTrue(fenwickTotal <= totalSupply, "Fenwick should not exceed total supply");
+        assertTrue(
+            fenwickTotal <= totalSupply,
+            "Fenwick should not exceed total supply"
+        );
 
         // Perform random transfers
         for (uint256 round = 0; round < 20; round++) {
@@ -207,7 +288,11 @@ contract StrategyAtomicityTest is Test {
 
         // Verify Fenwick tree still consistent
         uint256 finalFenwickTotal = monstr.getSuffixSum(1);
-        assertEq(finalFenwickTotal, expectedTotal, "Fenwick tree inconsistent after complex operations");
+        assertEq(
+            finalFenwickTotal,
+            expectedTotal,
+            "Fenwick tree inconsistent after complex operations"
+        );
     }
 
     function testAtomicityWithReentrancy() public {
@@ -223,13 +308,17 @@ contract StrategyAtomicityTest is Test {
         monstr.mint{value: 10 ether}();
 
         uint256 initialFenwick = monstr.getSuffixSum(1);
-        assertEq(initialFenwick, monstr.balanceOf(alice), "Initial Fenwick incorrect");
+        assertEq(
+            initialFenwick,
+            monstr.balanceOf(alice),
+            "Initial Fenwick incorrect"
+        );
 
         // Try to transfer to malicious contract
         // The reentrancy guard should prevent any issues
         uint256 transferAmount = 100 ether;
         uint256 netTransferred = 99 ether;
-        
+
         vm.expectEmit(true, true, true, true);
         emit Transfer(alice, address(malicious), netTransferred);
         vm.prank(alice);
@@ -243,12 +332,28 @@ contract StrategyAtomicityTest is Test {
         uint256 maliciousBalance = monstr.balanceOf(address(malicious));
 
         // Only Alice's balance should be in the Fenwick tree
-        assertEq(finalFenwick, aliceBalance, "Fenwick should only track Alice (EOA)");
+        assertEq(
+            finalFenwick,
+            aliceBalance,
+            "Fenwick should only track Alice (EOA)"
+        );
 
         // Verify the transfer happened correctly with exact amounts
-        assertEq(aliceBalance, 9800 ether, "Alice should have exactly 9,800 tokens");
-        assertEq(maliciousBalance, netTransferred, "Malicious contract should have exactly 99 tokens");
-        assertEq(monstr.balanceOf(monstr.FEES_POOL()), 101 ether, "Fees pool should have 101 tokens total");
+        assertEq(
+            aliceBalance,
+            9800 ether,
+            "Alice should have exactly 9,800 tokens"
+        );
+        assertEq(
+            maliciousBalance,
+            netTransferred,
+            "Malicious contract should have exactly 99 tokens"
+        );
+        assertEq(
+            monstr.balanceOf(monstr.FEES_POOL()),
+            101 ether,
+            "Fees pool should have 101 tokens total"
+        );
     }
 
     function testFenwickTreeWithZeroBalanceTransitions() public {
@@ -268,7 +373,11 @@ contract StrategyAtomicityTest is Test {
 
         // Alice should be removed from holders
         uint256 fenwick2 = monstr.getSuffixSum(1);
-        assertEq(fenwick2, monstr.balanceOf(bob), "Fenwick should only track Bob");
+        assertEq(
+            fenwick2,
+            monstr.balanceOf(bob),
+            "Fenwick should only track Bob"
+        );
 
         // Alice mints again (goes from 0 to positive)
         vm.prank(alice);

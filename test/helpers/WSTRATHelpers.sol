@@ -8,7 +8,11 @@ contract MockWMON {
     mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
+    event Approval(
+        address indexed owner,
+        address indexed spender,
+        uint256 value
+    );
 
     function deposit() external payable {
         balanceOf[msg.sender] += msg.value;
@@ -18,8 +22,8 @@ contract MockWMON {
     function withdraw(uint256 amount) external {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
-        (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "MON transfer failed");
         emit Transfer(msg.sender, address(0), amount);
     }
 
@@ -37,9 +41,16 @@ contract MockWMON {
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
@@ -61,12 +72,16 @@ abstract contract WMONTestBase is Test {
     IWMON public wmon;
 
     function setupWMON() internal {
-        // Deploy mock WETH for tests that don't inherit from StrategyTestBase
-        MockWMON mockWeth = new MockWMON();
-        wmon = IWMON(address(mockWeth));
+        // Deploy mock WMON for tests that don't inherit from StrategyTestBase
+        MockWMON mockWmon = new MockWMON();
+        wmon = IWMON(address(mockWmon));
     }
 
-    function getWMONAndApprove(address user, address spender, uint256 amount) internal {
+    function getWMONAndApprove(
+        address user,
+        address spender,
+        uint256 amount
+    ) internal {
         vm.startPrank(user);
         wmon.deposit{value: amount}();
         wmon.approve(spender, amount);

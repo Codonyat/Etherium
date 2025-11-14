@@ -25,14 +25,14 @@ abstract contract StrategyTestBase is Test {
     // Events for testing
     event Minted(
         address indexed user,
-        uint256 ethAmount,
+        uint256 monAmount,
         uint256 userTokens,
         uint256 feeTokens
     );
     event Redeemed(
         address indexed user,
         uint256 tokenAmount,
-        uint256 ethAmount,
+        uint256 monAmount,
         uint256 fee
     );
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -53,8 +53,8 @@ abstract contract StrategyTestBase is Test {
         uint256 monPaid,
         uint256 day
     );
-    event PublicGoodsFunded(
-        address indexed publicGood,
+    event BeneficiaryFunded(
+        address indexed beneficiary,
         uint256 amount,
         address originalWinner
     );
@@ -164,9 +164,9 @@ contract MockContract {
     receive() external payable {}
 }
 
-// Contract that rejects ETH transfers
+// Contract that rejects MON transfers
 contract MockRejectETH {
-    // No receive or fallback function - will reject ETH transfers
+    // No receive or fallback function - will reject MON transfers
 }
 
 // Attack contract for reentrancy tests
@@ -260,7 +260,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        require(success, "MON transfer failed");
         emit Transfer(msg.sender, address(0), amount);
     }
 

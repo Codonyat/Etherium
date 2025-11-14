@@ -5,19 +5,19 @@ import {StrategyTestBase, MockContract} from "./helpers/StrategyTestBase.sol";
 
 contract StrategyMintingTest is StrategyTestBase {
     function testMintingWithFee() public {
-        uint256 ethAmount = 1 ether;
-        uint256 expectedTokens = ethAmount * 990; // 990 tokens per ETH after 1% fee
-        uint256 expectedFee = ethAmount * 10; // 10 tokens fee per ETH
+        uint256 monAmount = 1 ether;
+        uint256 expectedTokens = (monAmount * 99) / 100; // 0.99 tokens per MON after 1% fee (1:1 ratio)
+        uint256 expectedFee = monAmount / 100; // 0.01 tokens fee per MON
 
         vm.expectEmit(true, true, true, true);
-        emit Minted(alice, ethAmount, expectedTokens, expectedFee);
+        emit Minted(alice, monAmount, expectedTokens, expectedFee);
 
         vm.prank(alice);
-        monstr.mint{value: ethAmount}();
+        monstr.mint{value: monAmount}();
 
         assertEq(monstr.balanceOf(alice), expectedTokens);
         assertEq(monstr.balanceOf(monstr.FEES_POOL()), expectedFee);
-        assertEq(address(monstr).balance, ethAmount);
+        assertEq(address(monstr).balance, monAmount);
     }
 
     function testRedeemWithFee() public {
@@ -29,18 +29,18 @@ contract StrategyMintingTest is StrategyTestBase {
         uint256 redeemAmount = 1000 ether; // Redeem 1000 tokens
         uint256 expectedFee = 10 ether; // 1% fee
         uint256 netRedeemed = redeemAmount - expectedFee;
-        uint256 expectedEth = netRedeemed / 1000; // 1000:1 ratio
+        uint256 expectedMon = netRedeemed; // 1:1 ratio (proportional to backing)
 
-        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceMonBefore = alice.balance;
 
         vm.expectEmit(true, true, true, true);
-        emit Redeemed(alice, redeemAmount, expectedEth, expectedFee);
+        emit Redeemed(alice, redeemAmount, expectedMon, expectedFee);
 
         vm.prank(alice);
         monstr.redeem(redeemAmount);
 
         assertEq(monstr.balanceOf(alice), initialBalance - redeemAmount);
-        assertEq(alice.balance - aliceEthBefore, expectedEth);
+        assertEq(alice.balance - aliceMonBefore, expectedMon);
     }
 
     function testMintingPeriodEnforcement() public {
@@ -90,7 +90,7 @@ contract StrategyMintingTest is StrategyTestBase {
         assertGt(monstr.balanceOf(bob), 0);
     }
 
-    function testRedeemingAllMonstrDepleteContractETH() public {
+    function testRedeemingAllMonstrDepleteContractMON() public {
         // Multiple users mint
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
@@ -108,21 +108,21 @@ contract StrategyMintingTest is StrategyTestBase {
         vm.prank(bob);
         monstr.redeem(bobBalance);
 
-        // Contract should have very little ETH left (just fees)
+        // Contract should have very little MON left (just fees)
         assertTrue(address(monstr).balance < 1 ether);
     }
 
-    function testMaxSupplyNeverExceededWithPublicGoodsDonations() public {
-        // Setup public goods
-        address publicGood1 = address(0x1001);
-        address publicGood2 = address(0x1002);
-        address[] memory publicGoods = new address[](2);
-        publicGoods[0] = publicGood1;
-        publicGoods[1] = publicGood2;
+    function testMaxSupplyNeverExceededWithBeneficiaryDonations() public {
+        // Setup beneficiaries
+        address beneficiary1 = address(0x1001);
+        address beneficiary2 = address(0x1002);
+        address[] memory beneficiaries = new address[](2);
+        beneficiaries[0] = beneficiary1;
+        beneficiaries[1] = beneficiary2;
 
-        // Fund public goods
-        vm.deal(publicGood1, 100 ether);
-        vm.deal(publicGood2, 100 ether);
+        // Fund beneficiaries
+        vm.deal(beneficiary1, 100 ether);
+        vm.deal(beneficiary2, 100 ether);
 
         // Initial mint during minting period
         vm.prank(alice);
@@ -136,7 +136,7 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.redeem(1000 ether);
 
         uint256 maxSupply = monstr.maxSupplyEver();
-        assertEq(maxSupply, 100000 ether); // 100 ETH * 1000 ratio
+        assertEq(maxSupply, 100 ether); // 100 MON * 1:1 ratio
 
         // Generate fees and execute lottery multiple times
         for (uint256 i = 0; i < 10; i++) {
@@ -158,11 +158,11 @@ contract StrategyMintingTest is StrategyTestBase {
         assertLe(totalSupply, maxSupply, "Total supply should not exceed max");
     }
 
-    function testETHDonations() public {
+    function testMONDonations() public {
         // Initial state
         uint256 initialContractBalance = address(monstr).balance;
 
-        // Alice donates ETH directly to the contract via receive()
+        // Alice donates MON directly to the contract via receive()
         uint256 donationAmount = 5 ether;
 
         vm.prank(alice);
@@ -218,10 +218,7 @@ contract StrategyMintingTest is StrategyTestBase {
         );
 
         // Alice should now be tracked as holder (EOA)
-        assertTrue(
-            monstr.isHolder(alice),
-            "Alice should be tracked as holder"
-        );
+        assertTrue(monstr.isHolder(alice), "Alice should be tracked as holder");
 
         // Test 2: Contract can transfer to another contract
         MockContract secondContract = new MockContract();
@@ -327,7 +324,7 @@ contract StrategyMintingTest is StrategyTestBase {
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
-        // Max supply is now set to 2000 MONSTR (2 ETH minted * 1000)
+        // Max supply is now set to 2000 MONSTR (2 MON minted * 1000)
         assertEq(
             monstr.maxSupplyEver(),
             2000 ether,
@@ -343,19 +340,19 @@ contract StrategyMintingTest is StrategyTestBase {
         // - Bob has 990 + 0.99 (from transfer) = 990.99 MONSTR
         // - FEES_POOL has 10 + 10 + 0.01 (transfer fee) + 5 (redeem fee) = 25.01 MONSTR
         // - Total supply = 489.01 + 990.99 + 25.01 = 1505.01 MONSTR
-        // - Contract ETH = 2 ETH - 0.495 ETH (redeemed) = 1.505 ETH
+        // - Contract MON = 2 MON - 0.495 MON (redeemed) = 1.505 MON
 
-        // Donate a large amount of ETH to increase the backing value
+        // Donate a large amount of MON to increase the backing value
         vm.deal(address(this), 10000 ether);
         (bool success, ) = address(monstr).call{value: 10000 ether}("");
-        assertTrue(success, "ETH donation should succeed");
+        assertTrue(success, "MON donation should succeed");
 
         // Now we have:
-        // - Contract ETH = 1.505 + 10000 = 10001.505 ETH
+        // - Contract MON = 1.505 + 10000 = 10001.505 MON
         // - Total supply = 1505.01 MONSTR
         // - Mint formula: monstrToMint = (msg.value * totalSupply) / ethBalance
 
-        // With 1 wei of ETH:
+        // With 1 wei of MON:
         // monstrToMint = (1 * 1505.01e18) / 10001.505e18 ≈ 0.15 wei (much less than 100!)
 
         // Try to mint with 1 wei - should fail due to minimum requirement
@@ -364,8 +361,8 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.mint{value: 1 wei}();
 
         // To mint exactly 99 wei (below minimum):
-        // 99 = (ethAmount * 1505.01e18) / 10001.505e18
-        // ethAmount = 99 * 10001.505e18 / 1505.01e18 ≈ 657.79 wei
+        // 99 = (monAmount * 1505.01e18) / 10001.505e18
+        // monAmount = 99 * 10001.505e18 / 1505.01e18 ≈ 657.79 wei
         // Let's use 658 wei which should mint about 99 wei
 
         vm.prank(charlie);
@@ -373,8 +370,8 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.mint{value: 658 wei}();
 
         // To mint exactly 100 wei (at minimum):
-        // 100 = (ethAmount * 1505.01e18) / 10001.505e18
-        // ethAmount = 100 * 10001.505e18 / 1505.01e18 ≈ 664.63 wei
+        // 100 = (monAmount * 1505.01e18) / 10001.505e18
+        // monAmount = 100 * 10001.505e18 / 1505.01e18 ≈ 664.63 wei
         // Let's use 665 wei which should mint about 100 wei
 
         // This should succeed as it mints at least 100 wei

@@ -11,13 +11,21 @@ contract StrategyLotteryTest is StrategyTestBase {
         emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
-        assertEq(monstr.balanceOf(alice), 9900 ether, "Alice should have 9900 MONSTR");
+        assertEq(
+            monstr.balanceOf(alice),
+            9900 ether,
+            "Alice should have 9900 MONSTR"
+        );
 
         vm.expectEmit(true, false, false, true);
         emit Minted(bob, 5 ether, 4950 ether, 50 ether);
         vm.prank(bob);
         monstr.mint{value: 5 ether}();
-        assertEq(monstr.balanceOf(bob), 4950 ether, "Bob should have 4950 MONSTR");
+        assertEq(
+            monstr.balanceOf(bob),
+            4950 ether,
+            "Bob should have 4950 MONSTR"
+        );
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
@@ -28,8 +36,16 @@ contract StrategyLotteryTest is StrategyTestBase {
         vm.prank(alice);
         bool success = monstr.transfer(bob, 1000 ether);
         assertTrue(success, "Transfer should succeed");
-        assertEq(monstr.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
-        assertEq(monstr.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 (1000 - 10 fee)");
+        assertEq(
+            monstr.balanceOf(alice),
+            aliceBalanceBefore - 1000 ether,
+            "Alice balance should decrease by 1000"
+        );
+        assertEq(
+            monstr.balanceOf(bob),
+            bobBalanceBefore + 990 ether,
+            "Bob should receive 990 (1000 - 10 fee)"
+        );
 
         // Move to day 9 to execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -47,11 +63,20 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Verify lottery was executed for the correct day
         uint256 currentDay = monstr.getCurrentDay();
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(
+            (currentDay - 1) % 7
+        );
 
         // Should have a winner with correct amount
-        assertTrue(winner == alice || winner == bob, "Winner should be alice or bob");
-        assertEq(amount, 5 ether, "Prize amount should be 5 MONSTR (50% of 10 fee)");
+        assertTrue(
+            winner == alice || winner == bob,
+            "Winner should be alice or bob"
+        );
+        assertEq(
+            amount,
+            5 ether,
+            "Prize amount should be 5 MONSTR (50% of 10 fee)"
+        );
     }
 
     function testLotteryWithMultipleHolders() public {
@@ -82,9 +107,14 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Check that we have a winner
         uint256 currentDay = monstr.getCurrentDay();
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(
+            (currentDay - 1) % 7
+        );
 
-        assertTrue(winner == alice || winner == bob || winner == charlie, "Winner should be one of the holders");
+        assertTrue(
+            winner == alice || winner == bob || winner == charlie,
+            "Winner should be one of the holders"
+        );
         assertGt(amount, 0, "Winner should have prize amount");
     }
 
@@ -137,7 +167,7 @@ contract StrategyLotteryTest is StrategyTestBase {
             // Check if there's a winner for the previous day
             // unclaimedPrizes is a 7-slot array, use modulo to avoid out of bounds
             uint256 prizeDay = (currentDay - 1) % 7;
-            (address winner,) = monstr.lotteryUnclaimedPrizes(prizeDay);
+            (address winner, ) = monstr.lotteryUnclaimedPrizes(prizeDay);
 
             if (winner == alice) aliceWins++;
             else if (winner == bob) bobWins++;
@@ -176,15 +206,16 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Day 8 is even (auction), day 9 is odd (lottery)
         // Check for the appropriate day based on what was executed
-        (address winner8,) = monstr.lotteryUnclaimedPrizes(8 % 7);
-        (address winner9,) = monstr.lotteryUnclaimedPrizes(9 % 7);
+        (address winner8, ) = monstr.lotteryUnclaimedPrizes(8 % 7);
+        (address winner9, ) = monstr.lotteryUnclaimedPrizes(9 % 7);
 
         // Check for lottery or auction execution
-        (,,, uint112 auctionAmount,) = monstr.currentAuction();
+        (, , , uint112 auctionAmount, ) = monstr.currentAuction();
 
         // Should have executed lottery on a day or started an auction
         assertTrue(
-            winner8 != address(0) || winner9 != address(0) || auctionAmount > 0, "Should have lottery winner or auction"
+            winner8 != address(0) || winner9 != address(0) || auctionAmount > 0,
+            "Should have lottery winner or auction"
         );
     }
 
@@ -207,7 +238,9 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Get the winner
         uint256 currentDay = monstr.getCurrentDay();
-        (address winner1,) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        (address winner1, ) = monstr.lotteryUnclaimedPrizes(
+            (currentDay - 1) % 7
+        );
 
         // Now move to next day and generate more fees
         vm.prank(bob);
@@ -220,7 +253,10 @@ contract StrategyLotteryTest is StrategyTestBase {
         monstr.executeLottery();
 
         // Winners should be based on balances at snapshot time
-        assertTrue(winner1 != address(0), "Should have winner from first lottery");
+        assertTrue(
+            winner1 != address(0),
+            "Should have winner from first lottery"
+        );
     }
 
     function testLotteryAfterComplexHolderChanges() public {
@@ -251,7 +287,9 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Verify lottery executed correctly
         uint256 currentDay = monstr.getCurrentDay();
-        (address winner,) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        (address winner, ) = monstr.lotteryUnclaimedPrizes(
+            (currentDay - 1) % 7
+        );
 
         assertTrue(winner != address(0), "Should have lottery winner");
     }
@@ -271,7 +309,9 @@ contract StrategyLotteryTest is StrategyTestBase {
         monstr.executeLottery();
 
         uint256 day1 = monstr.getCurrentDay() - 1;
-        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(day1 % 7);
+        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(
+            day1 % 7
+        );
 
         // Second lottery cycle
         vm.prank(bob);
@@ -282,7 +322,9 @@ contract StrategyLotteryTest is StrategyTestBase {
         monstr.executeLottery();
 
         uint256 day2 = monstr.getCurrentDay() - 1;
-        (address winner2, uint112 amount2) = monstr.lotteryUnclaimedPrizes(day2 % 7);
+        (address winner2, uint112 amount2) = monstr.lotteryUnclaimedPrizes(
+            day2 % 7
+        );
 
         // Both lotteries should have winners
         assertTrue(winner1 != address(0), "First lottery should have winner");
@@ -299,8 +341,8 @@ contract StrategyLotteryTest is StrategyTestBase {
         vm.prank(bob);
         monstr.mint{value: 5 ether}();
 
-        // Fees during minting: 10 ETH * 1000 * 0.01 = 100 tokens fee from alice
-        // 5 ETH * 1000 * 0.01 = 50 tokens fee from bob
+        // Fees during minting: 10 MON * 1:1 * 0.01 = 0.1 tokens fee from alice
+        // 5 MON * 1:1 * 0.01 = 0.05 tokens fee from bob
         // Total day 0 fees: 150 tokens
 
         // Transfer on day 0 to generate more fees
@@ -340,7 +382,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Check multiple days as lottery/auction alternate
         bool hasWinner = false;
         for (uint256 day = 8; day <= 13; day++) {
-            (address winner,) = monstr.lotteryUnclaimedPrizes(day % 7);
+            (address winner, ) = monstr.lotteryUnclaimedPrizes(day % 7);
             if (winner != address(0)) {
                 hasWinner = true;
                 break;
@@ -348,9 +390,12 @@ contract StrategyLotteryTest is StrategyTestBase {
         }
 
         // Or check if auction has the fees
-        (,,, uint112 auctionAmount,) = monstr.currentAuction();
+        (, , , uint112 auctionAmount, ) = monstr.currentAuction();
 
-        assertTrue(hasWinner || auctionAmount > 0, "Should have executed delayed lottery or auction");
+        assertTrue(
+            hasWinner || auctionAmount > 0,
+            "Should have executed delayed lottery or auction"
+        );
     }
 
     function testNoLotteryWhenNoFeesCollected() public {
@@ -379,7 +424,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Check last few slots (remember it's a 14-slot circular buffer)
         for (uint256 i = 0; i < 3; i++) {
             uint256 checkDay = ((currentDay - 1 - i) % 14);
-            (address winner,) = monstr.lotteryUnclaimedPrizes(checkDay);
+            (address winner, ) = monstr.lotteryUnclaimedPrizes(checkDay);
             if (winner != address(0)) {
                 // This might be an old winner from before day 20
                 // Can't definitively test this without more complex state tracking
@@ -416,15 +461,23 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Day 8 is even (auction day), check if auction or lottery executed
         // After minting period, days alternate between lottery and auction
         // Check current auction to see if it has the fees
-        (address bidder,,, uint112 auctionAmount,) = monstr.currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
 
         // Should have auction with the fees
         assertGt(auctionAmount, 0, "Should have auction amount");
-        assertEq(auctionAmount, 7.5 ether, "Auction should have 7.5 tokens (50% of fees)");
+        assertEq(
+            auctionAmount,
+            7.5 ether,
+            "Auction should have 7.5 tokens (50% of fees)"
+        );
 
         // Verify LOT_POOL received the funds
         uint256 lotPoolBalance = monstr.balanceOf(monstr.LOT_POOL());
-        assertGe(lotPoolBalance, 7.5 ether, "LOT_POOL should have at least the prize amount");
+        assertGe(
+            lotPoolBalance,
+            7.5 ether,
+            "LOT_POOL should have at least the prize amount"
+        );
     }
 
     function testClaimPrize() public {
@@ -456,12 +509,25 @@ contract StrategyLotteryTest is StrategyTestBase {
             uint256 winnerBalanceAfter = monstr.balanceOf(winner);
 
             // Verify prize was transferred
-            assertEq(winnerBalanceAfter - winnerBalanceBefore, amount, "Winner should receive prize amount");
+            assertEq(
+                winnerBalanceAfter - winnerBalanceBefore,
+                amount,
+                "Winner should receive prize amount"
+            );
 
             // Verify prize is marked as claimed
-            (address winnerAfterClaim, uint112 amountAfterClaim) = monstr.lotteryUnclaimedPrizes(9 % 7);
-            assertEq(winnerAfterClaim, address(0), "Prize should be marked as claimed");
-            assertEq(amountAfterClaim, 0, "Prize amount should be zero after claim");
+            (address winnerAfterClaim, uint112 amountAfterClaim) = monstr
+                .lotteryUnclaimedPrizes(9 % 7);
+            assertEq(
+                winnerAfterClaim,
+                address(0),
+                "Prize should be marked as claimed"
+            );
+            assertEq(
+                amountAfterClaim,
+                0,
+                "Prize amount should be zero after claim"
+            );
         } else {
             // Day 9 might have been an auction day, not lottery
             // Skip this test case
@@ -498,7 +564,7 @@ contract StrategyLotteryTest is StrategyTestBase {
             vm.deal(user, 10 ether);
 
             // Each user mints different amount
-            uint256 mintAmount = (i % 3 + 1) * 0.5 ether;
+            uint256 mintAmount = ((i % 3) + 1) * 0.5 ether;
             vm.prank(user);
             monstr.mint{value: mintAmount}();
         }
@@ -527,10 +593,15 @@ contract StrategyLotteryTest is StrategyTestBase {
         monstr.executeLottery();
 
         // Verify lottery or auction executed
-        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(9 % 7);
-        (address bidder,,, uint112 auctionAmount,) = monstr.currentAuction();
+        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
+            9 % 7
+        );
+        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
 
         // Should have either lottery or auction
-        assertTrue(winner != address(0) || auctionAmount > 0, "Should have executed lottery or auction");
+        assertTrue(
+            winner != address(0) || auctionAmount > 0,
+            "Should have executed lottery or auction"
+        );
     }
 }

@@ -53,13 +53,13 @@ contract StrategyCoreTest is StrategyTestBase {
     }
 
     function testRejectDirectETHTransfer() public {
-        // The contract actually accepts ETH via receive() for donations
-        // Let's test that ETH can be sent but no tokens are minted
+        // The contract actually accepts MON via receive() for donations
+        // Let's test that MON can be sent but no tokens are minted
         uint256 initialSupply = monstr.totalSupply();
 
         vm.prank(alice);
         (bool success, ) = address(monstr).call{value: 1 ether}("");
-        assertTrue(success, "ETH transfer should succeed");
+        assertTrue(success, "MON transfer should succeed");
 
         // No tokens should be minted
         assertEq(
@@ -79,13 +79,13 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // Check that only one mint succeeded
         uint256 attackerBalance = monstr.balanceOf(address(attacker));
-        assertEq(attackerBalance, 1980 ether); // Only one mint: 2 ETH * 990
+        assertEq(attackerBalance, 1.98 ether); // Only one mint: 2 MON * 0.99 (after 1% fee)
     }
 
-    function testPublicGoodsReceiveLessETHDueToWETHWithdrawalTiming() public {
-        // This test expects that public goods should receive the correct amount
-        // (including WETH in the calculation). It FAILS because the current
-        // implementation withdraws WETH AFTER the calculation.
+    function testBeneficiariesReceiveLessMONDueToWMONWithdrawalTiming() public {
+        // This test expects that beneficiaries should receive the correct amount
+        // (including WMON in the calculation). It FAILS because the current
+        // implementation withdraws WMON AFTER the calculation.
 
         // Setup initial state
         vm.prank(alice);
@@ -158,28 +158,28 @@ contract StrategyCoreTest is StrategyTestBase {
                 monstr.bid(bidAmount2);
                 vm.stopPrank();
 
-                // Get the public good address and make it able to receive ETH
-                address publicGood = monstr.PUBLIC_GOODS(3);
-                console.log("Public goods to check:", publicGood);
+                // Get the beneficiary address and make it able to receive MON
+                address beneficiary = monstr.BENEFICIARIES(0);
+                console.log("Beneficiary to check:", beneficiary);
 
-                uint256 publicGoodBefore = publicGood.balance;
+                uint256 beneficiaryBefore = beneficiary.balance;
 
                 // Get balances BEFORE finalization
-                uint256 ethBalance = address(monstr).balance;
-                uint256 wethBalance = wmon.balanceOf(address(monstr));
+                uint256 monBalance = address(monstr).balance;
+                uint256 wmonBalance = wmon.balanceOf(address(monstr));
                 uint256 totalSupply = monstr.totalSupply();
 
-                // Calculate expected amount for auction's public goods payment
-                // IMPORTANT: The auction calculates BEFORE withdrawing WETH!
+                // Calculate expected amount for auction's beneficiary payment
+                // IMPORTANT: The auction calculates BEFORE withdrawing WMON!
                 // The execution order in _finalizeAuction is:
-                // 1. Calculate ETH to send using current balance (line 1108)
-                // 2. Send ETH to public goods (line 1111)
-                // 3. WETH.withdraw() happens AFTER (line 1124)
+                // 1. Calculate MON to send using current balance (line 1108)
+                // 2. Send MON to beneficiary (line 1111)
+                // 3. WMON.withdraw() happens AFTER (line 1124)
                 //
-                // So the auction does NOT include WETH in its calculation!
+                // So the auction does NOT include WMON in its calculation!
                 uint256 expectedAmount;
                 {
-                    // Get the auction prize that will be sent to public goods
+                    // Get the auction prize that will be sent to beneficiary
                     (, uint112 auctionPrize) = monstr.auctionUnclaimedPrizes(
                         slot1
                     );
@@ -190,41 +190,41 @@ contract StrategyCoreTest is StrategyTestBase {
                         lotterySlot
                     );
 
-                    uint256 balanceForAuctionCalc = ethBalance;
+                    uint256 balanceForAuctionCalc = monBalance;
                     uint256 supplyForAuctionCalc = totalSupply;
 
-                    // Account for lottery's public goods payment and burn
+                    // Account for lottery's beneficiary payment and burn
                     if (lotteryPrize > 0) {
                         uint256 lotteryPayment = (uint256(lotteryPrize) *
-                            ethBalance) / totalSupply;
+                            monBalance) / totalSupply;
                         balanceForAuctionCalc -= lotteryPayment;
                         supplyForAuctionCalc -= lotteryPrize;
                     }
 
-                    // The auction calculation does NOT include WETH (it's withdrawn after)
+                    // The auction calculation does NOT include WMON (it's withdrawn after)
                     expectedAmount =
                         (uint256(auctionPrize) * balanceForAuctionCalc) /
                         supplyForAuctionCalc;
 
-                    console.log("=== WETH Timing Test ===");
+                    console.log("=== WMON Timing Test ===");
                     console.log("Unclaimed prize:", auctionPrize);
                 }
-                console.log("ETH balance:", ethBalance);
-                console.log("WETH balance:", wethBalance);
-                console.log("Expected to public goods:", expectedAmount);
+                console.log("MON balance:", monBalance);
+                console.log("WMON balance:", wmonBalance);
+                console.log("Expected to beneficiary:", expectedAmount);
 
                 // Finalize auction
                 vm.warp(block.timestamp + 25 hours + 61);
                 monstr.executeLottery();
 
-                uint256 actualSent = publicGood.balance - publicGoodBefore;
+                uint256 actualSent = beneficiary.balance - beneficiaryBefore;
                 console.log("Actual sent:", actualSent);
 
-                // This assertion FAILS - public goods get less than expected
+                // This assertion FAILS - beneficiaries get less than expected
                 assertEq(
                     actualSent,
                     expectedAmount,
-                    "Public goods should receive ETH calculated with WETH balance included"
+                    "Beneficiaries should receive MON calculated with WMON balance included"
                 );
                 return;
             }
@@ -233,9 +233,9 @@ contract StrategyCoreTest is StrategyTestBase {
         revert("Failed to set up test conditions");
     }
 
-    function testPublicGoodsReceiveLessETHDueToWETHTiming() public {
-        // This test FAILS to show that public goods receive LESS ETH than they should
-        // because WETH is withdrawn AFTER the public goods calculation
+    function testBeneficiariesReceiveLessMONDueToWMONTiming() public {
+        // This test FAILS to show that beneficiaries receive LESS MON than they should
+        // because WMON is withdrawn AFTER the beneficiary calculation
 
         // Setup: Create a simple scenario with one auction
         vm.prank(alice);
@@ -327,82 +327,82 @@ contract StrategyCoreTest is StrategyTestBase {
         require(foundMatchingAuction, "Could not find matching auction slot");
 
         // Capture state BEFORE finalization
-        address publicGood = monstr.PUBLIC_GOODS(0);
-        uint256 publicGoodBalanceBefore = publicGood.balance;
-        uint256 contractETHBalance = address(monstr).balance;
-        uint256 contractWETHBalance = wmon.balanceOf(address(monstr));
+        address beneficiary = monstr.BENEFICIARIES(0);
+        uint256 beneficiaryBalanceBefore = beneficiary.balance;
+        uint256 contractMONBalance = address(monstr).balance;
+        uint256 contractWMONBalance = wmon.balanceOf(address(monstr));
         uint256 totalSupply = monstr.totalSupply();
 
-        // Calculate what SHOULD be sent if WETH was included
-        uint256 expectedIfWETHIncluded = (uint256(prizeStored) *
-            (contractETHBalance + contractWETHBalance)) / totalSupply;
+        // Calculate what SHOULD be sent if WMON was included
+        uint256 expectedIfWMONIncluded = (uint256(prizeStored) *
+            (contractMONBalance + contractWMONBalance)) / totalSupply;
 
-        // Calculate what WILL be sent (WETH not included)
-        uint256 expectedWithBug = (uint256(prizeStored) * contractETHBalance) /
+        // Calculate what WILL be sent (WMON not included)
+        uint256 expectedWithBug = (uint256(prizeStored) * contractMONBalance) /
             totalSupply;
 
-        console.log("Prize being sent to public goods:", prizeStored);
-        console.log("Contract ETH balance:", contractETHBalance);
-        console.log("Contract WETH balance:", contractWETHBalance);
+        console.log("Prize being sent to beneficiary:", prizeStored);
+        console.log("Contract MON balance:", contractMONBalance);
+        console.log("Contract WMON balance:", contractWMONBalance);
         console.log("Total supply:", totalSupply);
-        console.log("Expected if WETH included:", expectedIfWETHIncluded);
-        console.log("Expected with bug (WETH not included):", expectedWithBug);
+        console.log("Expected if WMON included:", expectedIfWMONIncluded);
+        console.log("Expected with bug (WMON not included):", expectedWithBug);
 
-        // Finalize - this SHOULD send old prize to public goods
+        // Finalize - this SHOULD send old prize to beneficiary
         vm.warp(block.timestamp + 25 hours + 61);
         monstr.executeLottery();
 
         // Check actual amount sent
-        uint256 actualSent = publicGood.balance - publicGoodBalanceBefore;
-        console.log("Actual ETH sent to public goods:", actualSent);
+        uint256 actualSent = beneficiary.balance - beneficiaryBalanceBefore;
+        console.log("Actual MON sent to beneficiary:", actualSent);
 
-        // The test should show that public goods get LESS than they should
+        // The test should show that beneficiaries get LESS than they should
         // But actualSent is 0, which means no transfer happened
         // This might be because day 14 is a lottery day, not auction
         // Or the unclaimed prize logic isn't triggering
 
         if (actualSent == 0) {
-            console.log("WARNING: No ETH was sent to public goods");
+            console.log("WARNING: No MON was sent to beneficiary");
             console.log("This suggests the unclaimed prize wasn't overwritten");
             // Let's at least verify the concept is correct
             assertTrue(
-                expectedWithBug < expectedIfWETHIncluded,
-                "Bug would cause less ETH to be sent"
+                expectedWithBug < expectedIfWMONIncluded,
+                "Bug would cause less MON to be sent"
             );
         } else {
-            // This assertion should FAIL - public goods get LESS than they should
+            // This assertion should FAIL - beneficiaries get LESS than they should
             assertEq(
                 actualSent,
-                expectedIfWETHIncluded,
-                "Public goods should receive ETH calculated with WETH included"
+                expectedIfWMONIncluded,
+                "Beneficiaries should receive MON calculated with WMON included"
             );
         }
     }
 
-    function testAuctionWETHWithdrawalTimingAffectsPublicGoods() public {
-        // This test would demonstrate that WETH withdrawal timing affects public goods
+    function testAuctionWMONWithdrawalTimingAffectsBeneficiaries() public {
+        // This test would demonstrate that WMON withdrawal timing affects beneficiaries
         // However, the test is complex due to the auction/lottery alternation pattern
         // and the 7-day cycle for unclaimed prizes
 
         // The key issue: In _finalizeAuction(), the order is:
-        // 1. Calculate ethToSend = (prize.amount * address(this).balance) / totalSupply()
-        // 2. Send ETH to public goods
-        // 3. WETH.withdraw(currentAuction.currentBid) - happens AFTER
+        // 1. Calculate monToSend = (prize.amount * address(this).balance) / totalSupply()
+        // 2. Send MON to beneficiaries
+        // 3. WMON.withdraw(currentAuction.currentBid) - happens AFTER
 
-        // This means public goods calculations use a lower ETH balance (without WETH)
-        // resulting in less ETH sent to public goods than they deserve
+        // This means beneficiary calculations use a lower MON balance (without WMON)
+        // resulting in less MON sent to beneficiaries than they deserve
 
         // Marking test as pending - the issue is confirmed in the code review
         assertTrue(
             true,
-            "WETH timing issue identified - public goods get less ETH"
+            "WMON timing issue identified - beneficiaries get less MON"
         );
     }
 
-    function testETHSentToPublicGoodsNotMonstr() public {
-        // Setup public goods addresses
-        address publicGood1 = address(0x9999);
-        address publicGood2 = address(0x8888);
+    function testETHSentToBeneficiariesNotMonstr() public {
+        // Setup beneficiary addresses
+        address beneficiary1 = address(0x9999);
+        address beneficiary2 = address(0x8888);
 
         // Setup holders
         setupBasicHolders();
@@ -445,8 +445,8 @@ contract StrategyCoreTest is StrategyTestBase {
             monstr.executeLottery();
         }
 
-        // Public goods should receive ETH, not MONSTR tokens
-        // (Implementation sends to winner if public goods fail)
+        // Beneficiaries should receive MON, not MONSTR tokens
+        // (Implementation sends to winner if beneficiaries fail)
     }
 
     function testUnclaimedPrizeFailedTransferGoesToCurrentWinner() public {
@@ -504,7 +504,7 @@ contract StrategyCoreTest is StrategyTestBase {
         assertTrue(true, "System continues to operate after unclaimed prizes");
     }
 
-    function testUnclaimedPrizeGoesToPublicGood() public {
+    function testUnclaimedPrizeGoesToBeneficiary() public {
         setupBasicHolders();
 
         // Move past minting period
@@ -545,7 +545,7 @@ contract StrategyCoreTest is StrategyTestBase {
         }
     }
 
-    function testPublicGoodsFunding() public {
+    function testBeneficiaryFunding() public {
         setupBasicHolders();
 
         // Move past minting period
@@ -560,15 +560,16 @@ contract StrategyCoreTest is StrategyTestBase {
         monstr.executeLottery();
 
         // Check if we got a lottery winner (day 8 is even, so should be 25 MONSTR to lottery)
-        (address winner1, uint112 prizeAmount1) = monstr
-            .lotteryUnclaimedPrizes(8 % 7);
+        (address winner1, uint112 prizeAmount1) = monstr.lotteryUnclaimedPrizes(
+            8 % 7
+        );
 
         if (winner1 != address(0)) {
-            // Track the first public good's balance
-            address firstPublicGood = monstr.PUBLIC_GOODS(0);
-            uint256 publicGoodBalanceBefore = firstPublicGood.balance;
+            // Track the first beneficiary's balance
+            address firstBeneficiary = monstr.BENEFICIARIES(0);
+            uint256 beneficiaryBalanceBefore = firstBeneficiary.balance;
 
-            // Capture contract state BEFORE the 7-day wait (before public goods transfer)
+            // Capture contract state BEFORE the 7-day wait (before beneficiary transfer)
             uint256 contractBalanceBefore = address(monstr).balance;
             uint256 totalSupplyBefore = monstr.totalSupply();
 
@@ -583,35 +584,35 @@ contract StrategyCoreTest is StrategyTestBase {
                 monstr.executeLottery();
             }
 
-            // Now check if public good received the correct ETH amount
-            uint256 publicGoodBalanceAfter = firstPublicGood.balance;
+            // Now check if beneficiary received the correct MON amount
+            uint256 beneficiaryBalanceAfter = firstBeneficiary.balance;
 
-            // Calculate expected ETH based on MONSTR to ETH conversion
-            // Should use the contract balance at time of transfer (after WETH withdrawal if any)
-            uint256 expectedETH = (prizeAmount1 * contractBalanceBefore) /
+            // Calculate expected MON based on MONSTR to MON conversion
+            // Should use the contract balance at time of transfer (after WMON withdrawal if any)
+            uint256 expectedMON = (prizeAmount1 * contractBalanceBefore) /
                 totalSupplyBefore;
 
             console.log("Unclaimed MONSTR prize:", prizeAmount1);
-            console.log("Contract ETH balance before:", contractBalanceBefore);
+            console.log("Contract MON balance before:", contractBalanceBefore);
             console.log("Total MONSTR supply before:", totalSupplyBefore);
-            console.log("Expected ETH to public good:", expectedETH);
+            console.log("Expected MON to beneficiary:", expectedMON);
             console.log(
-                "Actual ETH sent:",
-                publicGoodBalanceAfter - publicGoodBalanceBefore
+                "Actual MON sent:",
+                beneficiaryBalanceAfter - beneficiaryBalanceBefore
             );
 
             assertApproxEqAbs(
-                publicGoodBalanceAfter - publicGoodBalanceBefore,
-                expectedETH,
+                beneficiaryBalanceAfter - beneficiaryBalanceBefore,
+                expectedMON,
                 1, // Allow 1 wei difference for rounding
-                "Public good should receive ETH based on proper MONSTR/ETH conversion"
+                "Beneficiary should receive MON based on proper MONSTR/MON conversion"
             );
         }
     }
 
-    function testPublicGoodsFundingReverts() public {
-        // Deploy a contract that reverts on ETH receive as public good
-        MockRejectETH rejectingPublicGood = new MockRejectETH();
+    function testBeneficiaryFundingReverts() public {
+        // Deploy a contract that reverts on MON receive as beneficiary
+        MockRejectETH rejectingBeneficiary = new MockRejectETH();
 
         setupBasicHolders();
 
@@ -631,8 +632,7 @@ contract StrategyCoreTest is StrategyTestBase {
         // Check for lottery or auction execution
         // Day 9 could be lottery or auction depending on implementation
         (address winner, ) = monstr.lotteryUnclaimedPrizes(9 % 7);
-        (address bidder, , , uint112 auctionAmount, ) = monstr
-            .currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
 
         // Should have either lottery winner or auction
         assertTrue(
@@ -660,8 +660,7 @@ contract StrategyCoreTest is StrategyTestBase {
         monstr.executeLottery();
 
         // Verify auction was created
-        (address bidder, , , uint112 auctionAmount, ) = monstr
-            .currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
         assertEq(bidder, address(0), "Auction should have no bidder initially");
         assertGt(auctionAmount, 0, "Auction should have tokens");
     }

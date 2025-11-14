@@ -55,7 +55,7 @@ contract StrategyFenwickTest is StrategyTestBase {
 
             // Binary search to find winner
             uint256 winnerIndex = findWinnerIndex(position);
-            (address winner,) = monstr.getHolderByIndex(winnerIndex);
+            (address winner, ) = monstr.getHolderByIndex(winnerIndex);
             console.log("Winner index:", winnerIndex);
             console.log("Winner address:", winner);
         }
@@ -79,8 +79,16 @@ contract StrategyFenwickTest is StrategyTestBase {
         uint256 cumSum3 = monstr.getSuffixSum(3);
 
         // Total should be 990 + 1980 + 2970 = 5940
-        assertEq(cumSum1, 5940 ether, "Suffix sum from index 1 should be total (5940)");
-        assertEq(cumSum2, 1980 ether + 2970 ether, "Suffix sum from index 2 should be 4950");
+        assertEq(
+            cumSum1,
+            5940 ether,
+            "Suffix sum from index 1 should be total (5940)"
+        );
+        assertEq(
+            cumSum2,
+            1980 ether + 2970 ether,
+            "Suffix sum from index 2 should be 4950"
+        );
         assertEq(cumSum3, 2970 ether, "Suffix sum from index 3 should be 2970");
     }
 
@@ -112,9 +120,16 @@ contract StrategyFenwickTest is StrategyTestBase {
         uint256 charlieBalance = monstr.balanceOf(charlie);
         uint256 davidBalance = monstr.balanceOf(david);
 
-        uint256 expectedHolderTotal = aliceBalance + bobBalance + charlieBalance + davidBalance;
+        uint256 expectedHolderTotal = aliceBalance +
+            bobBalance +
+            charlieBalance +
+            davidBalance;
 
-        assertEq(totalFromFenwick, expectedHolderTotal, "Fenwick total should match sum of holder balances");
+        assertEq(
+            totalFromFenwick,
+            expectedHolderTotal,
+            "Fenwick total should match sum of holder balances"
+        );
     }
 
     function testHolderTracking() public {
@@ -163,7 +178,7 @@ contract StrategyFenwickTest is StrategyTestBase {
         for (uint256 i = 1; i <= numHolders; i++) {
             (address holder, uint256 balance) = monstr.getHolderByIndex(i);
             assertEq(holder, address(uint160(0x1000 + i - 1)));
-            assertEq(balance, 99 ether); // 0.1 ETH * 990
+            assertEq(balance, 0.099 ether); // 0.1 MON * 0.99 (after 1% fee)
         }
     }
 

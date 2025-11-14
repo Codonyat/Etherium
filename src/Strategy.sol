@@ -17,7 +17,7 @@ interface IWMON {
 /**
  * @title MONSTR
  * @dev ERC20 token backed by MON with daily lottery and auction mechanics
- * - During 7-day minting period: 1 MON = 1 MONSTR (both 18 decimals)
+ * - During minting period: 1 MON = 1 MONSTR (both 18 decimals)
  * - Redemption: Proportional share of contract's MON (MONSTR * MON balance / total supply)
  * - 1% fee on mint/burn/transfer (split between lottery and auction pools)
  * - Daily lottery for random holder using prevrandao
@@ -31,8 +31,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
-    uint256 public constant MINTING_PERIOD = 7 days;
-    uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e6; // 100 tokens (assumes 6 decimals, adjust if needed)
+    uint256 public constant MINTING_PERIOD = 1 days;
+    uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e12;
     uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic addresses for fee management
@@ -47,7 +47,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     // Packed storage slot: 112 + 32 + 8 = 152 bits (fits in one 256-bit slot)
     uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion MONSTR with 18 decimals)
     uint32 public lastLotteryDay; // Day counter (sufficient for ~11.7 million years)
-    uint8 public currentPublicGoodIndex; // Index in PUBLIC_GOODS array (max 255 addresses)
+    uint8 public currentBeneficiaryIndex; // Index in BENEFICIARIES array (max 255 addresses)
 
     uint256 public constant TIME_GAP = 1 minutes; // Must be 1 minute into new day before lottery can execute
     uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 MONSTR) to run lottery/auction
@@ -65,13 +65,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     UnclaimedPrize[7] public lotteryUnclaimedPrizes;
     UnclaimedPrize[7] public auctionUnclaimedPrizes;
 
-    // Public goods recipients (hardcoded)
-    address[5] public PUBLIC_GOODS = [
-        0x25941dC771bB64514Fc8abBce970307Fb9d477e9, // Protocol Guild
-        0x15322B546e31F5Bfe144C4ae133A9Db6F0059fe3, // Coin Center
-        0x1C95930Dfc1139381265ce45B5f480F1EFae09A1, // DeFi Education Fund
-        0x25f5D96B50a3f7c704E76C38A3F10617e83D9491, // European Crypto Initiative
-        0x8D3AcA27963D5BAD978d3e953D3F3680cEa3FAeC // Ethereum Cat Herders
+    // Beneficiary recipients (hardcoded)
+    address[1] public BENEFICIARIES = [
+        0x5000Ff6Cc1864690d947B864B9FB0d603E8d1F1A // Treasury
     ];
 
     // Struct to maintain rolling 2-day history for each value
@@ -125,8 +121,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event PrizeClaimed(address indexed winner, uint256 amount);
-    event PublicGoodsFunded(
-        address indexed publicGood,
+    event BeneficiaryFunded(
+        address indexed beneficiary,
         uint256 amount,
         address previousWinner
     );
@@ -193,7 +189,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // This allows:
         // 1. WMON withdrawals for auctions
         // 2. Community donations that increase backing value
-        // 3. Failed public goods transfers to not revert
+        // 3. Failed beneficiary transfers to not revert
     }
 
     /**
@@ -217,15 +213,13 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Get balance before minting
         if (block.timestamp <= mintingEndTime) {
             // During minting period: 1 MON = 1 MONSTR
-            // Overflow safety: msg.value < 2^96 (fits in uint256)
             monstrToMint = msg.value;
         } else {
             // After minting period: proportional to MON/supply ratio
             uint256 monBalance = address(this).balance - msg.value; // Exclude sent MON
             if (totalSupply() > 0 && monBalance > 0) {
                 // Mint proportionally to maintain MON backing ratio
-                // Overflow safety: msg.value < 2^96, totalSupply() <= maxSupplyEver < 2^112
-                // Product < 2^208, which fits in uint256 (no overflow possible)
+                // Overflow safety: msg.value, totalSupply < 100B * 1e18, msg.value * totalSupply < 2^2^256
                 monstrToMint = (msg.value * totalSupply()) / monBalance;
             } else {
                 // Fallback to 1:1 if no supply or MON
@@ -241,8 +235,6 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         }
 
         // Calculate and apply fees (common to both minting periods)
-        // Overflow safety: monstrToMint <= maxSupplyEver < 2^112, FEE_PERCENT = 100 < 2^7
-        // Product < 2^119, which fits in uint256 (no overflow possible)
         fee = (monstrToMint * FEE_PERCENT) / BASIS_POINTS;
         netMONSTR = monstrToMint - fee;
 
@@ -363,14 +355,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Try to execute pending lottery/auction before changing state
         _tryExecuteLotteryAndAuction();
 
-        // Overflow safety: amount <= user balance <= totalSupply < 2^112, FEE_PERCENT = 100 < 2^7
-        // Product < 2^119, which fits in uint256 (no overflow possible)
         uint256 fee = (amount * FEE_PERCENT) / BASIS_POINTS;
         uint256 netMONSTR = amount - fee;
 
         // Calculate proportional MON to return before state changes
-        // Overflow safety: netMONSTR < 2^112, address(this).balance < 2^96 (MON supply limit)
-        // Product < 2^208, which fits in uint256 (no overflow possible)
         uint256 monToReturn = (netMONSTR * address(this).balance) /
             totalSupply();
 
@@ -449,8 +437,6 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         _tryExecuteLotteryAndAuction();
 
         // Apply fees for transfers
-        // Overflow safety: value <= totalSupply < 2^112, FEE_PERCENT = 100 < 2^7
-        // Product < 2^119, which fits in uint256 (no overflow possible)
         uint256 fee = (value * FEE_PERCENT) / BASIS_POINTS;
         uint256 netAmount = value - fee;
 
@@ -772,10 +758,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             // Check if this slot has an unclaimed lottery prize
             UnclaimedPrize storage prize = lotteryUnclaimedPrizes[slot];
             if (prize.amount > 0) {
-                // Try to redeem MONSTR for MON and send to public good
-                address publicGood = PUBLIC_GOODS[currentPublicGoodIndex];
-                currentPublicGoodIndex = uint8(
-                    (currentPublicGoodIndex + 1) % PUBLIC_GOODS.length
+                // Try to redeem MONSTR for MON and send to beneficiary
+                address beneficiary = BENEFICIARIES[currentBeneficiaryIndex];
+                currentBeneficiaryIndex = uint8(
+                    (currentBeneficiaryIndex + 1) % BENEFICIARIES.length
                 );
 
                 // Calculate MON value of the MONSTR prize
@@ -783,14 +769,14 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                 uint256 monToSend = (uint256(prize.amount) *
                     address(this).balance) / totalSupply();
 
-                // Attempt to send MON to public good
-                (bool success, ) = publicGood.call{value: monToSend}("");
+                // Attempt to send MON to beneficiary
+                (bool success, ) = beneficiary.call{value: monToSend}("");
 
                 if (success) {
                     // MON transfer successful, now burn the MONSTR tokens from lottery pool
                     _burn(LOT_POOL, prize.amount);
-                    emit PublicGoodsFunded(
-                        publicGood,
+                    emit BeneficiaryFunded(
+                        beneficiary,
                         monToSend, // Emit the actual MON amount sent
                         prize.winner
                     );
@@ -798,7 +784,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                     // MON transfer failed, add unclaimed prize to current winner's prize
                     // The current winner will get both prizes when they claim
                     feesToDistribute += prize.amount;
-                    // Note: We still cycle to the next public good for fairness
+                    // Note: We still cycle to the next beneficiary for fairness
                 }
             }
 
@@ -925,7 +911,6 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         );
 
         // Random number from 1 to total balance
-        // No overflow risk: modulo operation always produces result < snapshotTotalBalance
         uint256 winningNumber = (randomSeed % snapshotTotalBalance) + 1;
 
         // With suffix sums, we want to find the largest index where suffix sum >= winningNumber
@@ -1099,10 +1084,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Check if this slot has an unclaimed auction prize
         UnclaimedPrize storage prize = auctionUnclaimedPrizes[slot];
         if (prize.amount > 0) {
-            // Try to send to public good
-            address publicGood = PUBLIC_GOODS[currentPublicGoodIndex];
-            currentPublicGoodIndex = uint8(
-                (currentPublicGoodIndex + 1) % PUBLIC_GOODS.length
+            // Try to send to beneficiary
+            address beneficiary = BENEFICIARIES[currentBeneficiaryIndex];
+            currentBeneficiaryIndex = uint8(
+                (currentBeneficiaryIndex + 1) % BENEFICIARIES.length
             );
 
             // Calculate MON value of the MONSTR prize
@@ -1110,11 +1095,11 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             uint256 monToSend = (uint256(prize.amount) *
                 address(this).balance) / totalSupply();
 
-            (bool success, ) = publicGood.call{value: monToSend}("");
+            (bool success, ) = beneficiary.call{value: monToSend}("");
 
             if (success) {
                 _burn(LOT_POOL, prize.amount);
-                emit PublicGoodsFunded(publicGood, monToSend, prize.winner); // Emit actual MON amount
+                emit BeneficiaryFunded(beneficiary, monToSend, prize.winner); // Emit actual MON amount
             } else {
                 // Add to current winner's prize
                 currentAuction.monstrAmount += uint112(prize.amount);
@@ -1163,7 +1148,6 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         require(currentDay == lastLotteryDay, "Auction has ended");
 
         // Determine minimum bid required
-        // Overflow safety: currentBid < 2^96, 110 < 2^7, product < 2^103 (no overflow)
         uint256 minBid = currentAuction.currentBid == 0
             ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids

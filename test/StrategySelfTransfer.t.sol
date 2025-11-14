@@ -16,8 +16,8 @@ contract MockWMON {
     function withdraw(uint256 amount) external {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
-        (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "MON transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -32,9 +32,16 @@ contract MockWMON {
         return true;
     }
 
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
-        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
 
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
@@ -85,10 +92,18 @@ contract StrategySelfTransferTest is Test {
         console.log("Fenwick sum after self-transfer:", fenwickAfter);
 
         // Alice should lose 1% fee even on self-transfer
-        assertEq(aliceBalanceAfter, aliceBalanceBefore - 1 ether, "Should charge fee on self-transfer");
+        assertEq(
+            aliceBalanceAfter,
+            aliceBalanceBefore - 1 ether,
+            "Should charge fee on self-transfer"
+        );
 
         // Fenwick should still be consistent
-        assertEq(fenwickAfter, aliceBalanceAfter, "Fenwick should match Alice's balance");
+        assertEq(
+            fenwickAfter,
+            aliceBalanceAfter,
+            "Fenwick should match Alice's balance"
+        );
     }
 
     function testSelfTransferWithMultipleHolders() public {
@@ -101,7 +116,11 @@ contract StrategySelfTransferTest is Test {
 
         uint256 totalBefore = monstr.balanceOf(alice) + monstr.balanceOf(bob);
         uint256 fenwickBefore = monstr.getSuffixSum(1);
-        assertEq(fenwickBefore, totalBefore, "Initial Fenwick should match total");
+        assertEq(
+            fenwickBefore,
+            totalBefore,
+            "Initial Fenwick should match total"
+        );
 
         // Alice self-transfers
         vm.prank(alice);
@@ -111,7 +130,11 @@ contract StrategySelfTransferTest is Test {
         uint256 fenwickAfter = monstr.getSuffixSum(1);
 
         // Total should decrease by fee amount
-        assertEq(totalBefore - totalAfter, 5 ether, "Total should decrease by fee");
+        assertEq(
+            totalBefore - totalAfter,
+            5 ether,
+            "Total should decrease by fee"
+        );
 
         // Fenwick should still track correctly
         assertEq(fenwickAfter, totalAfter, "Fenwick should match new total");
@@ -133,7 +156,11 @@ contract StrategySelfTransferTest is Test {
             uint256 fenwick = monstr.getSuffixSum(1);
             uint256 aliceBalance = monstr.balanceOf(alice);
             assertEq(fenwick, aliceBalance, "Fenwick should match balance");
-            assertEq(aliceBalance, expectedBalance, "Balance should match expected");
+            assertEq(
+                aliceBalance,
+                expectedBalance,
+                "Balance should match expected"
+            );
         }
     }
 
@@ -158,12 +185,21 @@ contract StrategySelfTransferTest is Test {
         monstr.transfer(bob, 1000 ether);
 
         // Check that Fenwick still only tracks real holders
-        uint256 totalHolderBalance = monstr.balanceOf(alice) + monstr.balanceOf(bob);
+        uint256 totalHolderBalance = monstr.balanceOf(alice) +
+            monstr.balanceOf(bob);
         uint256 fenwickAfter = monstr.getSuffixSum(1);
-        assertEq(fenwickAfter, totalHolderBalance, "Fenwick should only track real holders");
+        assertEq(
+            fenwickAfter,
+            totalHolderBalance,
+            "Fenwick should only track real holders"
+        );
 
         // Verify fees went to FEES_POOL but aren't in Fenwick
         uint256 newFeesBalance = monstr.balanceOf(monstr.FEES_POOL());
-        assertGt(newFeesBalance, feesBalance, "FEES_POOL should have more fees");
+        assertGt(
+            newFeesBalance,
+            feesBalance,
+            "FEES_POOL should have more fees"
+        );
     }
 }
