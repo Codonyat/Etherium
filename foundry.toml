@@ -12,4 +12,13 @@ optimizer = true
 optimizer_runs = 4294967295 # 2^32-1
 
 [rpc_endpoints]
+# Ethereum (legacy)
 mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
+
+# Monad Mainnet (Chain ID: 143)
+# monad = "${MONAD_RPC_URL}" # RPC URL TBA, set via env variable when available
+
+# Monad Testnet (Chain ID: 10143)
+monad_testnet = "https://testnet-rpc.monad.xyz" # QuickNode, 25 rps, archives supported
+monad_testnet_ankr = "https://rpc.ankr.com/monad_testnet" # Ankr, 300 req/10s, no archives
+monad_testnet_foundation = "https://rpc-testnet.monadinfra.com" # Monad Foundation, 20 rps, archives

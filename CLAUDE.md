@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Etherium is a Solidity smart contract project implementing an ERC20 token backed by ETH with daily lottery mechanics and decentralized randomness generation. The token uses a 1:1 ratio (1 ETH = 1 ETHERIUM, both with 18 decimals) and implements a 1% fee structure on all operations.
+Strategy is a Solidity smart contract project implementing an ERC20 token backed by MON with daily lottery mechanics and decentralized randomness generation. The token uses a 1:1000 ratio (1 MON = 1000 MONSTR, both with 18 decimals) and implements a 1% fee structure on all operations.
 
 ## Development Commands
 
@@ -41,7 +41,7 @@ forge clean && forge build
 
 ### Core Contract Structure
 
-- **Main Contract**: `src/Etherium.sol` - Inherits from OpenZeppelin's ERC20 and ReentrancyGuard
+- **Main Contract**: `src/Strategy.sol` - Inherits from OpenZeppelin's ERC20 and ReentrancyGuard
 - **Fee System**: 1% total fee split into 0.9% lottery pool and 0.1% randomness participant rewards
 - **PepeUSD Lock Mechanism**:
   - Users can lock 100 PepeUSD during minting period (each lock enables one fee-free mint)

@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {EtheriumTestBase, MockContract, ReentrancyAttacker, MockRejectETH} from "./helpers/EtheriumTestBase.sol";
+import {StrategyTestBase, MockContract, ReentrancyAttacker, MockRejectETH} from "./helpers/StrategyTestBase.sol";
 import {console} from "forge-std/Test.sol";
-import {IWETH} from "../src/Etherium.sol";
-import {WETHTestBase, MockWETH} from "./helpers/WETHHelpers.sol";
+import {IWMON} from "../src/Strategy.sol";
 
-contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
-    function setUp() public override {
-        setupWETH();
-        super.setUp();
-    }
+contract StrategyCoreTest is StrategyTestBase {
     function testTransferWithFee() public {
         // Alice mints tokens
         vm.expectEmit(true, false, false, true);
         emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Verify initial balances
-        uint256 aliceInitial = etherium.balanceOf(alice);
+        uint256 aliceInitial = monstr.balanceOf(alice);
         assertEq(
             aliceInitial,
             9900 ether,
-            "Alice should have 9900 ETHERIUM after minting"
+            "Alice should have 9900 MONSTR after minting"
         );
         assertEq(
-            etherium.balanceOf(etherium.FEES_POOL()),
+            monstr.balanceOf(monstr.FEES_POOL()),
             100 ether,
-            "Fees pool should have 100 ETHERIUM from mint"
+            "Fees pool should have 100 MONSTR from mint"
         );
 
         uint256 transferAmount = 1000 ether;
@@ -37,21 +32,21 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Transfer with fee verification
         vm.prank(alice);
-        bool success = etherium.transfer(bob, transferAmount);
+        bool success = monstr.transfer(bob, transferAmount);
         assertTrue(success, "Transfer should succeed");
 
         assertEq(
-            etherium.balanceOf(alice),
+            monstr.balanceOf(alice),
             aliceInitial - transferAmount,
             "Alice balance should decrease by transfer amount"
         );
         assertEq(
-            etherium.balanceOf(bob),
+            monstr.balanceOf(bob),
             expectedReceived,
             "Bob should receive amount minus fee"
         );
         assertEq(
-            etherium.balanceOf(etherium.FEES_POOL()),
+            monstr.balanceOf(monstr.FEES_POOL()),
             100 ether + expectedFee,
             "Fees pool should increase by transfer fee"
         );
@@ -60,30 +55,30 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
     function testRejectDirectETHTransfer() public {
         // The contract actually accepts ETH via receive() for donations
         // Let's test that ETH can be sent but no tokens are minted
-        uint256 initialSupply = etherium.totalSupply();
+        uint256 initialSupply = monstr.totalSupply();
 
         vm.prank(alice);
-        (bool success, ) = address(etherium).call{value: 1 ether}("");
+        (bool success, ) = address(monstr).call{value: 1 ether}("");
         assertTrue(success, "ETH transfer should succeed");
 
         // No tokens should be minted
         assertEq(
-            etherium.totalSupply(),
+            monstr.totalSupply(),
             initialSupply,
             "No tokens should be minted"
         );
-        assertEq(etherium.balanceOf(alice), 0, "Alice should have no tokens");
+        assertEq(monstr.balanceOf(alice), 0, "Alice should have no tokens");
     }
 
     function testReentrancyGuardWorks() public {
-        ReentrancyAttacker attacker = new ReentrancyAttacker(etherium);
+        ReentrancyAttacker attacker = new ReentrancyAttacker(monstr);
         vm.deal(address(attacker), 10 ether);
 
         // Attacker tries to reenter during mint
         attacker.attack{value: 2 ether}();
 
         // Check that only one mint succeeded
-        uint256 attackerBalance = etherium.balanceOf(address(attacker));
+        uint256 attackerBalance = monstr.balanceOf(address(attacker));
         assertEq(attackerBalance, 1980 ether); // Only one mint: 2 ETH * 990
     }
 
@@ -94,25 +89,25 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Setup initial state
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
         vm.prank(bob);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees for first auction
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Start first auction
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Get auction details
         uint256 slot1;
         {
-            (, , , uint112 amount, uint32 auctionDay1) = etherium
+            (, , , uint112 amount, uint32 auctionDay1) = monstr
                 .currentAuction();
             require(amount > 0, "Should have active auction");
             slot1 = auctionDay1 % 7;
@@ -120,22 +115,22 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         }
 
         // Place WETH bid
-        IWETH weth = IWETH(etherium.WETH());
+        IWMON wethToken = IWMON(address(monstr.wmon()));
         uint256 bidAmount1 = 1 ether;
         vm.deal(charlie, bidAmount1);
         vm.startPrank(charlie);
-        weth.deposit{value: bidAmount1}();
-        weth.approve(address(etherium), bidAmount1);
-        etherium.bid(bidAmount1);
+        wmon.deposit{value: bidAmount1}();
+        wmon.approve(address(monstr), bidAmount1);
+        monstr.bid(bidAmount1);
         vm.stopPrank();
 
         // Finalize auction - stores as unclaimed prize
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify unclaimed prize stored
         {
-            (address winner1, ) = etherium.auctionUnclaimedPrizes(slot1);
+            (address winner1, ) = monstr.auctionUnclaimedPrizes(slot1);
             require(winner1 == charlie, "Charlie should win");
             // Prize amount will be verified when we need it later
         }
@@ -144,12 +139,12 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // We need to cycle through until we find an auction that will overwrite slot1
         for (uint i = 0; i < 7; i++) {
             vm.prank(alice);
-            etherium.transfer(bob, 100 ether);
+            monstr.transfer(bob, 100 ether);
             vm.warp(block.timestamp + 25 hours + 61);
-            etherium.executeLottery();
+            monstr.executeLottery();
 
             // Check if we're at an auction day with matching slot
-            (, , , uint112 currentAmount, uint32 currentDay) = etherium
+            (, , , uint112 currentAmount, uint32 currentDay) = monstr
                 .currentAuction();
 
             // Check if this is an auction (not lottery) with the same slot
@@ -158,21 +153,21 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
                 uint256 bidAmount2 = 0.5 ether;
                 vm.deal(david, bidAmount2);
                 vm.startPrank(david);
-                weth.deposit{value: bidAmount2}();
-                weth.approve(address(etherium), bidAmount2);
-                etherium.bid(bidAmount2);
+                wmon.deposit{value: bidAmount2}();
+                wmon.approve(address(monstr), bidAmount2);
+                monstr.bid(bidAmount2);
                 vm.stopPrank();
 
                 // Get the public good address and make it able to receive ETH
-                address publicGood = etherium.PUBLIC_GOODS(3);
+                address publicGood = monstr.PUBLIC_GOODS(3);
                 console.log("Public goods to check:", publicGood);
 
                 uint256 publicGoodBefore = publicGood.balance;
 
                 // Get balances BEFORE finalization
-                uint256 ethBalance = address(etherium).balance;
-                uint256 wethBalance = weth.balanceOf(address(etherium));
-                uint256 totalSupply = etherium.totalSupply();
+                uint256 ethBalance = address(monstr).balance;
+                uint256 wethBalance = wmon.balanceOf(address(monstr));
+                uint256 totalSupply = monstr.totalSupply();
 
                 // Calculate expected amount for auction's public goods payment
                 // IMPORTANT: The auction calculates BEFORE withdrawing WETH!
@@ -185,13 +180,13 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
                 uint256 expectedAmount;
                 {
                     // Get the auction prize that will be sent to public goods
-                    (, uint112 auctionPrize) = etherium.auctionUnclaimedPrizes(
+                    (, uint112 auctionPrize) = monstr.auctionUnclaimedPrizes(
                         slot1
                     );
 
                     // Check if there's an unclaimed lottery prize that will be sent first
-                    uint256 lotterySlot = (etherium.getCurrentDay() - 1) % 7;
-                    (, uint112 lotteryPrize) = etherium.lotteryUnclaimedPrizes(
+                    uint256 lotterySlot = (monstr.getCurrentDay() - 1) % 7;
+                    (, uint112 lotteryPrize) = monstr.lotteryUnclaimedPrizes(
                         lotterySlot
                     );
 
@@ -220,7 +215,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
                 // Finalize auction
                 vm.warp(block.timestamp + 25 hours + 61);
-                etherium.executeLottery();
+                monstr.executeLottery();
 
                 uint256 actualSent = publicGood.balance - publicGoodBefore;
                 console.log("Actual sent:", actualSent);
@@ -244,44 +239,44 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Setup: Create a simple scenario with one auction
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
         vm.prank(bob);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees and create first auction
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether); // 10 ETHERIUM fee
+        monstr.transfer(bob, 1000 ether); // 10 MONSTR fee
 
         // Execute to start auction (day 9)
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Get current auction details
-        (, , uint96 minBid, uint112 auctionAmount, uint32 auctionDay) = etherium
+        (, , uint96 minBid, uint112 auctionAmount, uint32 auctionDay) = monstr
             .currentAuction();
         uint256 slot = auctionDay % 7;
         console.log("First auction day:", auctionDay);
         console.log("First auction slot:", slot);
 
         // Place WETH bid
-        IWETH weth = IWETH(etherium.WETH());
+        IWMON wethToken = IWMON(address(monstr.wmon()));
         uint256 bidAmount = minBid > 0 ? uint256(minBid) : 0.1 ether;
         vm.deal(charlie, bidAmount);
         vm.startPrank(charlie);
-        weth.deposit{value: bidAmount}();
-        weth.approve(address(etherium), bidAmount);
-        etherium.bid(bidAmount);
+        wmon.deposit{value: bidAmount}();
+        wmon.approve(address(monstr), bidAmount);
+        monstr.bid(bidAmount);
         vm.stopPrank();
 
         // Finalize auction (day 10)
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify auction prize was stored
-        (address winner, uint112 prizeStored) = etherium.auctionUnclaimedPrizes(
+        (address winner, uint112 prizeStored) = monstr.auctionUnclaimedPrizes(
             slot
         );
         assertEq(winner, charlie, "Charlie should be winner");
@@ -295,10 +290,10 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         while (!foundMatchingAuction && attempts < 20) {
             // Generate fees
             vm.prank(alice);
-            etherium.transfer(bob, 100 ether);
+            monstr.transfer(bob, 100 ether);
 
             vm.warp(block.timestamp + 25 hours + 61);
-            etherium.executeLottery();
+            monstr.executeLottery();
 
             // Check if we have an auction with matching slot
             (
@@ -307,7 +302,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
                 uint96 newMinBid,
                 uint112 newAuctionAmount,
                 uint32 newAuctionDay
-            ) = etherium.currentAuction();
+            ) = monstr.currentAuction();
             if (newAuctionAmount > 0 && newAuctionDay % 7 == slot) {
                 console.log("Found matching auction!");
                 console.log("New auction day:", newAuctionDay);
@@ -319,9 +314,9 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
                     : 1 ether;
                 vm.deal(david, newBidAmount);
                 vm.startPrank(david);
-                weth.deposit{value: newBidAmount}();
-                weth.approve(address(etherium), newBidAmount);
-                etherium.bid(newBidAmount);
+                wmon.deposit{value: newBidAmount}();
+                wmon.approve(address(monstr), newBidAmount);
+                monstr.bid(newBidAmount);
                 vm.stopPrank();
 
                 foundMatchingAuction = true;
@@ -332,11 +327,11 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         require(foundMatchingAuction, "Could not find matching auction slot");
 
         // Capture state BEFORE finalization
-        address publicGood = etherium.PUBLIC_GOODS(0);
+        address publicGood = monstr.PUBLIC_GOODS(0);
         uint256 publicGoodBalanceBefore = publicGood.balance;
-        uint256 contractETHBalance = address(etherium).balance;
-        uint256 contractWETHBalance = weth.balanceOf(address(etherium));
-        uint256 totalSupply = etherium.totalSupply();
+        uint256 contractETHBalance = address(monstr).balance;
+        uint256 contractWETHBalance = wmon.balanceOf(address(monstr));
+        uint256 totalSupply = monstr.totalSupply();
 
         // Calculate what SHOULD be sent if WETH was included
         uint256 expectedIfWETHIncluded = (uint256(prizeStored) *
@@ -355,7 +350,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Finalize - this SHOULD send old prize to public goods
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Check actual amount sent
         uint256 actualSent = publicGood.balance - publicGoodBalanceBefore;
@@ -404,7 +399,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         );
     }
 
-    function testETHSentToPublicGoodsNotEtherium() public {
+    function testETHSentToPublicGoodsNotMonstr() public {
         // Setup public goods addresses
         address publicGood1 = address(0x9999);
         address publicGood2 = address(0x8888);
@@ -416,18 +411,18 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees
-        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
-        uint256 bobBalanceBefore = etherium.balanceOf(bob);
+        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        uint256 bobBalanceBefore = monstr.balanceOf(bob);
         vm.prank(alice);
-        bool success = etherium.transfer(bob, 1000 ether);
+        bool success = monstr.transfer(bob, 1000 ether);
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            etherium.balanceOf(alice),
+            monstr.balanceOf(alice),
             aliceBalanceBefore - 1000 ether,
             "Alice balance should decrease by 1000"
         );
         assertEq(
-            etherium.balanceOf(bob),
+            monstr.balanceOf(bob),
             bobBalanceBefore + 990 ether,
             "Bob should receive 990 (1000 - 10 fee)"
         );
@@ -435,22 +430,22 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // Execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Get winner
-        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(
+        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
             8 % 7
         );
 
         // Fast forward 14 days to trigger unclaimed prize distribution
         for (uint256 i = 0; i < 14; i++) {
             vm.prank(alice);
-            etherium.transfer(bob, 100 ether);
+            monstr.transfer(bob, 100 ether);
             vm.warp(block.timestamp + 25 hours + 61);
-            etherium.executeLottery();
+            monstr.executeLottery();
         }
 
-        // Public goods should receive ETH, not ETHERIUM tokens
+        // Public goods should receive ETH, not MONSTR tokens
         // (Implementation sends to winner if public goods fail)
     }
 
@@ -462,18 +457,18 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Day 9: Generate fees (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
-        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
-        uint256 bobBalanceBefore = etherium.balanceOf(bob);
+        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        uint256 bobBalanceBefore = monstr.balanceOf(bob);
         vm.prank(alice);
-        bool success = etherium.transfer(bob, 1000 ether);
+        bool success = monstr.transfer(bob, 1000 ether);
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            etherium.balanceOf(alice),
+            monstr.balanceOf(alice),
             aliceBalanceBefore - 1000 ether,
             "Alice balance should decrease"
         );
         assertEq(
-            etherium.balanceOf(bob),
+            monstr.balanceOf(bob),
             bobBalanceBefore + 990 ether,
             "Bob should receive 990 after fee"
         );
@@ -481,27 +476,27 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(
+        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(
             9 % 7
         );
 
         // Generate fees for multiple days to potentially overwrite slots
         for (uint256 i = 0; i < 14; i++) {
             // Generate fees
-            if (etherium.balanceOf(bob) > 100 ether) {
+            if (monstr.balanceOf(bob) > 100 ether) {
                 vm.prank(bob);
-                etherium.transfer(alice, 100 ether);
-            } else if (etherium.balanceOf(alice) > 100 ether) {
+                monstr.transfer(alice, 100 ether);
+            } else if (monstr.balanceOf(alice) > 100 ether) {
                 vm.prank(alice);
-                etherium.transfer(bob, 100 ether);
+                monstr.transfer(bob, 100 ether);
             }
 
             // Move to next day and execute
             vm.warp(block.timestamp + 25 hours + 61);
             vm.prevrandao(bytes32(uint256(i * 1000)));
-            etherium.executeLottery();
+            monstr.executeLottery();
         }
 
         // After 14 days, unclaimed prizes may be distributed
@@ -518,27 +513,27 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // Day 9: Generate fees
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(
+        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
             9 % 7
         );
 
         if (winner != address(0)) {
             // Wait 14 days and execute lotteries to trigger unclaimed distribution
             for (uint256 i = 0; i < 14; i++) {
-                if (etherium.balanceOf(alice) > 100 ether) {
+                if (monstr.balanceOf(alice) > 100 ether) {
                     vm.prank(alice);
-                    etherium.transfer(bob, 100 ether);
+                    monstr.transfer(bob, 100 ether);
                 }
                 vm.warp(block.timestamp + 25 hours + 61);
                 vm.prevrandao(bytes32(uint256(i * 7777)));
-                etherium.executeLottery();
+                monstr.executeLottery();
             }
 
             // After 14 days, prize may be distributed
@@ -558,47 +553,47 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Generate significant fees
         vm.prank(alice);
-        etherium.transfer(bob, 5000 ether); // 50 ETHERIUM fee
+        monstr.transfer(bob, 5000 ether); // 50 MONSTR fee
 
         // Execute lottery for day 8
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        // Check if we got a lottery winner (day 8 is even, so should be 25 ETHERIUM to lottery)
-        (address winner1, uint112 prizeAmount1) = etherium
+        // Check if we got a lottery winner (day 8 is even, so should be 25 MONSTR to lottery)
+        (address winner1, uint112 prizeAmount1) = monstr
             .lotteryUnclaimedPrizes(8 % 7);
 
         if (winner1 != address(0)) {
             // Track the first public good's balance
-            address firstPublicGood = etherium.PUBLIC_GOODS(0);
+            address firstPublicGood = monstr.PUBLIC_GOODS(0);
             uint256 publicGoodBalanceBefore = firstPublicGood.balance;
 
             // Capture contract state BEFORE the 7-day wait (before public goods transfer)
-            uint256 contractBalanceBefore = address(etherium).balance;
-            uint256 totalSupplyBefore = etherium.totalSupply();
+            uint256 contractBalanceBefore = address(monstr).balance;
+            uint256 totalSupplyBefore = monstr.totalSupply();
 
             // Wait 7 days to trigger unclaimed prize distribution
             for (uint256 i = 0; i < 7; i++) {
                 // Generate fees
                 vm.prank(alice);
-                etherium.transfer(bob, 100 ether);
+                monstr.transfer(bob, 100 ether);
 
                 // Execute lottery
                 vm.warp(block.timestamp + 25 hours + 61);
-                etherium.executeLottery();
+                monstr.executeLottery();
             }
 
             // Now check if public good received the correct ETH amount
             uint256 publicGoodBalanceAfter = firstPublicGood.balance;
 
-            // Calculate expected ETH based on ETHERIUM to ETH conversion
+            // Calculate expected ETH based on MONSTR to ETH conversion
             // Should use the contract balance at time of transfer (after WETH withdrawal if any)
             uint256 expectedETH = (prizeAmount1 * contractBalanceBefore) /
                 totalSupplyBefore;
 
-            console.log("Unclaimed ETHERIUM prize:", prizeAmount1);
+            console.log("Unclaimed MONSTR prize:", prizeAmount1);
             console.log("Contract ETH balance before:", contractBalanceBefore);
-            console.log("Total ETHERIUM supply before:", totalSupplyBefore);
+            console.log("Total MONSTR supply before:", totalSupplyBefore);
             console.log("Expected ETH to public good:", expectedETH);
             console.log(
                 "Actual ETH sent:",
@@ -609,7 +604,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
                 publicGoodBalanceAfter - publicGoodBalanceBefore,
                 expectedETH,
                 1, // Allow 1 wei difference for rounding
-                "Public good should receive ETH based on proper ETHERIUM/ETH conversion"
+                "Public good should receive ETH based on proper MONSTR/ETH conversion"
             );
         }
     }
@@ -626,17 +621,17 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // Generate fees on day 9 for lottery
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Execute lottery on day 10 - should not revert even if public good rejects
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Check for lottery or auction execution
         // Day 9 could be lottery or auction depending on implementation
-        (address winner, ) = etherium.lotteryUnclaimedPrizes(9 % 7);
-        (address bidder, , , uint112 auctionAmount, ) = etherium
+        (address winner, ) = monstr.lotteryUnclaimedPrizes(9 % 7);
+        (address bidder, , , uint112 auctionAmount, ) = monstr
             .currentAuction();
 
         // Should have either lottery winner or auction
@@ -648,7 +643,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
     function testWETHWithdrawalInAuction() public {
         // This test verifies WETH handling in auctions
-        // The actual WETH functionality is tested in EtheriumAuction.t.sol
+        // The actual WETH functionality is tested in StrategyAuction.t.sol
         // Here we just verify the contract can handle WETH
 
         setupBasicHolders();
@@ -658,14 +653,14 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // Generate fees for auction
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Execute to start auction
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify auction was created
-        (address bidder, , , uint112 auctionAmount, ) = etherium
+        (address bidder, , , uint112 auctionAmount, ) = monstr
             .currentAuction();
         assertEq(bidder, address(0), "Auction should have no bidder initially");
         assertGt(auctionAmount, 0, "Auction should have tokens");
@@ -677,24 +672,24 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // First mint to the test contract itself to have balance
         vm.deal(address(this), 10 ether);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
-        uint256 testContractBalance = etherium.balanceOf(address(this));
+        uint256 testContractBalance = monstr.balanceOf(address(this));
         assertEq(
             testContractBalance,
             9900 ether,
             "Test contract should have 9900 tokens"
         );
 
-        uint256 feesPoolBefore = etherium.balanceOf(etherium.FEES_POOL());
-        uint256 lotPoolBefore = etherium.balanceOf(etherium.LOT_POOL());
+        uint256 feesPoolBefore = monstr.balanceOf(monstr.FEES_POOL());
+        uint256 lotPoolBefore = monstr.balanceOf(monstr.LOT_POOL());
 
         // Test contract tries to transfer to LOT_POOL
-        etherium.transfer(etherium.LOT_POOL(), 100 ether);
+        monstr.transfer(monstr.LOT_POOL(), 100 ether);
 
         // Should be redirected to FEES_POOL
-        uint256 feesPoolAfter = etherium.balanceOf(etherium.FEES_POOL());
-        uint256 lotPoolAfter = etherium.balanceOf(etherium.LOT_POOL());
+        uint256 feesPoolAfter = monstr.balanceOf(monstr.FEES_POOL());
+        uint256 lotPoolAfter = monstr.balanceOf(monstr.LOT_POOL());
 
         assertEq(
             lotPoolAfter,
@@ -720,16 +715,16 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
         // Generate fees on day 9 (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
-        uint256 lotPoolBefore = etherium.balanceOf(etherium.LOT_POOL());
+        uint256 lotPoolBefore = monstr.balanceOf(monstr.LOT_POOL());
 
         // Execute lottery on day 10 for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123456)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        uint256 lotPoolAfter = etherium.balanceOf(etherium.LOT_POOL());
+        uint256 lotPoolAfter = monstr.balanceOf(monstr.LOT_POOL());
 
         // LOT_POOL should have received funds from the internal transfer
         // Either from lottery prize or auction amount
@@ -759,7 +754,7 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
             uint256 mintAmount = ((uint256(keccak256(abi.encode(seed, i))) %
                 5) + 1) * 1 ether;
             vm.prank(user);
-            etherium.mint{value: mintAmount}();
+            monstr.mint{value: mintAmount}();
         }
 
         // Perform random transfers
@@ -781,31 +776,31 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
             if (from == to) continue;
 
-            uint256 balance = etherium.balanceOf(from);
+            uint256 balance = monstr.balanceOf(from);
             if (balance > 100 ether) {
                 uint256 amount = uint256(
                     keccak256(abi.encode(seed, i, "amount"))
                 ) % (balance / 2);
                 if (amount > 0) {
                     vm.prank(from);
-                    etherium.transfer(to, amount);
+                    monstr.transfer(to, amount);
                 }
             }
         }
 
         // Verify invariants
         // 1. Total supply invariant
-        uint256 totalSupply = etherium.totalSupply();
+        uint256 totalSupply = monstr.totalSupply();
         uint256 sumOfBalances = 0;
 
         // Sum all special addresses
-        sumOfBalances += etherium.balanceOf(etherium.FEES_POOL());
-        sumOfBalances += etherium.balanceOf(etherium.LOT_POOL());
+        sumOfBalances += monstr.balanceOf(monstr.FEES_POOL());
+        sumOfBalances += monstr.balanceOf(monstr.LOT_POOL());
 
         // Sum all user balances
         for (uint256 i = 0; i < numUsers; i++) {
             address user = address(uint160(0x1000 + i));
-            sumOfBalances += etherium.balanceOf(user);
+            sumOfBalances += monstr.balanceOf(user);
         }
 
         // Total supply should equal sum of all balances
@@ -817,18 +812,18 @@ contract EtheriumCoreTest is EtheriumTestBase, WETHTestBase {
 
         // 2. Fenwick tree consistency
         uint256 fenwickTotal = 0;
-        uint256 holderCount = etherium.getHolderCount();
+        uint256 holderCount = monstr.getHolderCount();
         if (holderCount > 0) {
             // getSuffixSum(1) gets the total from the beginning
-            fenwickTotal = etherium.getSuffixSum(1);
+            fenwickTotal = monstr.getSuffixSum(1);
         }
 
         // Fenwick should track only EOA holders
         uint256 eoaTotal = 0;
         for (uint256 i = 0; i < numUsers; i++) {
             address user = address(uint160(0x1000 + i));
-            if (etherium.isHolder(user)) {
-                eoaTotal += etherium.balanceOf(user);
+            if (monstr.isHolder(user)) {
+                eoaTotal += monstr.balanceOf(user);
             }
         }
 

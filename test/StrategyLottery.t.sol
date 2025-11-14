@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {EtheriumTestBase, MockContract, MockRejectETH} from "./helpers/EtheriumTestBase.sol";
+import {StrategyTestBase, MockContract, MockRejectETH} from "./helpers/StrategyTestBase.sol";
 import {console} from "forge-std/Test.sol";
 
-contract EtheriumLotteryTest is EtheriumTestBase {
+contract StrategyLotteryTest is StrategyTestBase {
     function testPrevrandaoLottery() public {
         // Alice and Bob mint during initial period
         vm.expectEmit(true, false, false, true);
         emit Minted(alice, 10 ether, 9900 ether, 100 ether);
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
-        assertEq(etherium.balanceOf(alice), 9900 ether, "Alice should have 9900 ETHERIUM");
+        monstr.mint{value: 10 ether}();
+        assertEq(monstr.balanceOf(alice), 9900 ether, "Alice should have 9900 MONSTR");
 
         vm.expectEmit(true, false, false, true);
         emit Minted(bob, 5 ether, 4950 ether, 50 ether);
         vm.prank(bob);
-        etherium.mint{value: 5 ether}();
-        assertEq(etherium.balanceOf(bob), 4950 ether, "Bob should have 4950 ETHERIUM");
+        monstr.mint{value: 5 ether}();
+        assertEq(monstr.balanceOf(bob), 4950 ether, "Bob should have 4950 MONSTR");
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees via transfer on day 8
-        uint256 aliceBalanceBefore = etherium.balanceOf(alice);
-        uint256 bobBalanceBefore = etherium.balanceOf(bob);
+        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        uint256 bobBalanceBefore = monstr.balanceOf(bob);
         vm.prank(alice);
-        bool success = etherium.transfer(bob, 1000 ether);
+        bool success = monstr.transfer(bob, 1000 ether);
         assertTrue(success, "Transfer should succeed");
-        assertEq(etherium.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
-        assertEq(etherium.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 (1000 - 10 fee)");
+        assertEq(monstr.balanceOf(alice), aliceBalanceBefore - 1000 ether, "Alice balance should decrease by 1000");
+        assertEq(monstr.balanceOf(bob), bobBalanceBefore + 990 ether, "Bob should receive 990 (1000 - 10 fee)");
 
         // Move to day 9 to execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -40,18 +40,18 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Execute lottery
         // We're executing on day 9 for day 8's fees
         // Day 8 is even and after minting period, so fees split 50/50
-        // Transfer fee was 10 ETHERIUM, so 5 to lottery, 5 to auction
+        // Transfer fee was 10 MONSTR, so 5 to lottery, 5 to auction
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // Don't know exact winner due to randomness
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify lottery was executed for the correct day
-        uint256 currentDay = etherium.getCurrentDay();
-        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        uint256 currentDay = monstr.getCurrentDay();
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         // Should have a winner with correct amount
         assertTrue(winner == alice || winner == bob, "Winner should be alice or bob");
-        assertEq(amount, 5 ether, "Prize amount should be 5 ETHERIUM (50% of 10 fee)");
+        assertEq(amount, 5 ether, "Prize amount should be 5 MONSTR (50% of 10 fee)");
     }
 
     function testLotteryWithMultipleHolders() public {
@@ -62,15 +62,15 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        bool success1 = etherium.transfer(bob, 100 ether);
+        bool success1 = monstr.transfer(bob, 100 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Fee: 1 ETHERIUM
+        // Fee: 1 MONSTR
 
         vm.prank(bob);
-        bool success2 = etherium.transfer(charlie, 100 ether);
+        bool success2 = monstr.transfer(charlie, 100 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Fee: 1 ETHERIUM
-        // Total transfer fees: 2 ETHERIUM
+        // Fee: 1 MONSTR
+        // Total transfer fees: 2 MONSTR
 
         // Move to day 9 and execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -78,11 +78,11 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Set prevrandao
         vm.prevrandao(bytes32(uint256(789012)));
 
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Check that we have a winner
-        uint256 currentDay = etherium.getCurrentDay();
-        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        uint256 currentDay = monstr.getCurrentDay();
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         assertTrue(winner == alice || winner == bob || winner == charlie, "Winner should be one of the holders");
         assertGt(amount, 0, "Winner should have prize amount");
@@ -94,13 +94,13 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Set up holders with different balances
         vm.prank(alice);
-        etherium.mint{value: 10 ether}(); // Alice: 9,900 tokens
+        monstr.mint{value: 10 ether}(); // Alice: 9,900 tokens
 
         vm.prank(bob);
-        etherium.mint{value: 5 ether}(); // Bob: 4,950 tokens
+        monstr.mint{value: 5 ether}(); // Bob: 4,950 tokens
 
         vm.prank(charlie);
-        etherium.mint{value: 2 ether}(); // Charlie: 1,980 tokens
+        monstr.mint{value: 2 ether}(); // Charlie: 1,980 tokens
 
         // Track wins
         uint256 aliceWins;
@@ -112,15 +112,15 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         for (uint256 i = 0; i < rounds; i++) {
             // Generate some fees via transfer
-            if (i % 3 == 0 && etherium.balanceOf(alice) > 100 ether) {
+            if (i % 3 == 0 && monstr.balanceOf(alice) > 100 ether) {
                 vm.prank(alice);
-                etherium.transfer(bob, 100 ether);
-            } else if (i % 3 == 1 && etherium.balanceOf(bob) > 100 ether) {
+                monstr.transfer(bob, 100 ether);
+            } else if (i % 3 == 1 && monstr.balanceOf(bob) > 100 ether) {
                 vm.prank(bob);
-                etherium.transfer(charlie, 100 ether);
-            } else if (etherium.balanceOf(charlie) > 100 ether) {
+                monstr.transfer(charlie, 100 ether);
+            } else if (monstr.balanceOf(charlie) > 100 ether) {
                 vm.prank(charlie);
-                etherium.transfer(alice, 100 ether);
+                monstr.transfer(alice, 100 ether);
             }
 
             // Move to next day
@@ -130,14 +130,14 @@ contract EtheriumLotteryTest is EtheriumTestBase {
             vm.prevrandao(bytes32(uint256(keccak256(abi.encode(i, "test")))));
 
             // Execute lottery
-            etherium.executeLottery();
+            monstr.executeLottery();
 
-            uint256 currentDay = etherium.getCurrentDay();
+            uint256 currentDay = monstr.getCurrentDay();
 
             // Check if there's a winner for the previous day
             // unclaimedPrizes is a 7-slot array, use modulo to avoid out of bounds
             uint256 prizeDay = (currentDay - 1) % 7;
-            (address winner,) = etherium.lotteryUnclaimedPrizes(prizeDay);
+            (address winner,) = monstr.lotteryUnclaimedPrizes(prizeDay);
 
             if (winner == alice) aliceWins++;
             else if (winner == bob) bobWins++;
@@ -161,7 +161,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         // Move to day 9
         vm.warp(block.timestamp + 25 hours + 61);
@@ -171,16 +171,16 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Any external function should trigger lottery execution
         // Test with a simple balanceOf call
-        uint256 balance = etherium.balanceOf(alice);
+        uint256 balance = monstr.balanceOf(alice);
         assertTrue(balance > 0, "Alice should have balance");
 
         // Day 8 is even (auction), day 9 is odd (lottery)
         // Check for the appropriate day based on what was executed
-        (address winner8,) = etherium.lotteryUnclaimedPrizes(8 % 7);
-        (address winner9,) = etherium.lotteryUnclaimedPrizes(9 % 7);
+        (address winner8,) = monstr.lotteryUnclaimedPrizes(8 % 7);
+        (address winner9,) = monstr.lotteryUnclaimedPrizes(9 % 7);
 
         // Check for lottery or auction execution
-        (,,, uint112 auctionAmount,) = etherium.currentAuction();
+        (,,, uint112 auctionAmount,) = monstr.currentAuction();
 
         // Should have executed lottery on a day or started an auction
         assertTrue(
@@ -196,28 +196,28 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate fees
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         // Move to day 9
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Take snapshot by executing lottery
         vm.prevrandao(bytes32(uint256(123)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Get the winner
-        uint256 currentDay = etherium.getCurrentDay();
-        (address winner1,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        uint256 currentDay = monstr.getCurrentDay();
+        (address winner1,) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         // Now move to next day and generate more fees
         vm.prank(bob);
-        etherium.transfer(charlie, 100 ether);
+        monstr.transfer(charlie, 100 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Execute next lottery
         vm.prevrandao(bytes32(uint256(456)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Winners should be based on balances at snapshot time
         assertTrue(winner1 != address(0), "Should have winner from first lottery");
@@ -229,29 +229,29 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Add more holders
         vm.prank(david);
-        etherium.mint{value: 3 ether}();
+        monstr.mint{value: 3 ether}();
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Complex transfers
         vm.prank(alice);
-        etherium.transfer(eve, 500 ether);
+        monstr.transfer(eve, 500 ether);
 
         vm.prank(bob);
-        etherium.transfer(alice, 300 ether);
+        monstr.transfer(alice, 300 ether);
 
         vm.prank(charlie);
-        etherium.transfer(david, 100 ether);
+        monstr.transfer(david, 100 ether);
 
         // Execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify lottery executed correctly
-        uint256 currentDay = etherium.getCurrentDay();
-        (address winner,) = etherium.lotteryUnclaimedPrizes((currentDay - 1) % 7);
+        uint256 currentDay = monstr.getCurrentDay();
+        (address winner,) = monstr.lotteryUnclaimedPrizes((currentDay - 1) % 7);
 
         assertTrue(winner != address(0), "Should have lottery winner");
     }
@@ -264,25 +264,25 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // First lottery cycle
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        uint256 day1 = etherium.getCurrentDay() - 1;
-        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(day1 % 7);
+        uint256 day1 = monstr.getCurrentDay() - 1;
+        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(day1 % 7);
 
         // Second lottery cycle
         vm.prank(bob);
-        etherium.transfer(charlie, 200 ether);
+        monstr.transfer(charlie, 200 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(222)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        uint256 day2 = etherium.getCurrentDay() - 1;
-        (address winner2, uint112 amount2) = etherium.lotteryUnclaimedPrizes(day2 % 7);
+        uint256 day2 = monstr.getCurrentDay() - 1;
+        (address winner2, uint112 amount2) = monstr.lotteryUnclaimedPrizes(day2 % 7);
 
         // Both lotteries should have winners
         assertTrue(winner1 != address(0), "First lottery should have winner");
@@ -294,10 +294,10 @@ contract EtheriumLotteryTest is EtheriumTestBase {
     function testDay0FeesDistributedOnDay1() public {
         // Mint during day 0 (first day of minting period)
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 5 ether}();
+        monstr.mint{value: 5 ether}();
 
         // Fees during minting: 10 ETH * 1000 * 0.01 = 100 tokens fee from alice
         // 5 ETH * 1000 * 0.01 = 50 tokens fee from bob
@@ -305,15 +305,15 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Transfer on day 0 to generate more fees
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether); // 1 token fee
+        monstr.transfer(bob, 100 ether); // 1 token fee
 
         // Move to day 1 and execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Check that day 0 fees were distributed
-        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes(0);
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
         // Day 0 fees: 151 tokens total, all go to lottery during minting period
@@ -328,19 +328,19 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         // Skip to day 13 without triggering
         vm.warp(block.timestamp + 5 * 25 hours);
 
         // Now trigger lottery with prevrandao
         vm.prevrandao(bytes32(uint256(789)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Check multiple days as lottery/auction alternate
         bool hasWinner = false;
         for (uint256 day = 8; day <= 13; day++) {
-            (address winner,) = etherium.lotteryUnclaimedPrizes(day % 7);
+            (address winner,) = monstr.lotteryUnclaimedPrizes(day % 7);
             if (winner != address(0)) {
                 hasWinner = true;
                 break;
@@ -348,7 +348,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         }
 
         // Or check if auction has the fees
-        (,,, uint112 auctionAmount,) = etherium.currentAuction();
+        (,,, uint112 auctionAmount,) = monstr.currentAuction();
 
         assertTrue(hasWinner || auctionAmount > 0, "Should have executed delayed lottery or auction");
     }
@@ -356,30 +356,30 @@ contract EtheriumLotteryTest is EtheriumTestBase {
     function testNoLotteryWhenNoFeesCollected() public {
         // Create minimal setup to avoid fees during minting
         vm.prank(alice);
-        etherium.mint{value: 0.1 ether}();
+        monstr.mint{value: 0.1 ether}();
 
         // Move way past minting period
         vm.warp(block.timestamp + 20 days);
 
         // Try to execute any pending lotteries/auctions from old fees
         // This might revert if there are insufficient fees
-        try etherium.executeLottery() {} catch {}
+        try monstr.executeLottery() {} catch {}
 
         // Now we're on day 20, move to day 21 without any transfers (no fees)
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Try to execute lottery for day 20 (which had no fees)
         // This might revert with "Insufficient fees to distribute"
-        try etherium.executeLottery() {} catch {}
+        try monstr.executeLottery() {} catch {}
 
         // Check unclaimed prizes for recent days - should be no new winners
-        uint256 currentDay = etherium.getCurrentDay();
+        uint256 currentDay = monstr.getCurrentDay();
         bool hasRecentWinner = false;
 
         // Check last few slots (remember it's a 14-slot circular buffer)
         for (uint256 i = 0; i < 3; i++) {
             uint256 checkDay = ((currentDay - 1 - i) % 14);
-            (address winner,) = etherium.lotteryUnclaimedPrizes(checkDay);
+            (address winner,) = monstr.lotteryUnclaimedPrizes(checkDay);
             if (winner != address(0)) {
                 // This might be an old winner from before day 20
                 // Can't definitively test this without more complex state tracking
@@ -399,10 +399,10 @@ contract EtheriumLotteryTest is EtheriumTestBase {
 
         // Generate significant fees on day 8
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether); // 10 token fee
+        monstr.transfer(bob, 1000 ether); // 10 token fee
 
         vm.prank(bob);
-        etherium.transfer(charlie, 500 ether); // 5 token fee
+        monstr.transfer(charlie, 500 ether); // 5 token fee
 
         // Total fees: 15 tokens
         // After minting period, alternates between lottery and auction
@@ -411,19 +411,19 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Move to day 9 and execute
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123456)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Day 8 is even (auction day), check if auction or lottery executed
         // After minting period, days alternate between lottery and auction
         // Check current auction to see if it has the fees
-        (address bidder,,, uint112 auctionAmount,) = etherium.currentAuction();
+        (address bidder,,, uint112 auctionAmount,) = monstr.currentAuction();
 
         // Should have auction with the fees
         assertGt(auctionAmount, 0, "Should have auction amount");
         assertEq(auctionAmount, 7.5 ether, "Auction should have 7.5 tokens (50% of fees)");
 
         // Verify LOT_POOL received the funds
-        uint256 lotPoolBalance = etherium.balanceOf(etherium.LOT_POOL());
+        uint256 lotPoolBalance = monstr.balanceOf(monstr.LOT_POOL());
         assertGe(lotPoolBalance, 7.5 ether, "LOT_POOL should have at least the prize amount");
     }
 
@@ -436,30 +436,30 @@ contract EtheriumLotteryTest is EtheriumTestBase {
         // Generate fees on day 9 (odd day = lottery day)
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Execute lottery on day 10 for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(12345)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Get winner info for day 9
-        (address winner, uint112 amount) = etherium.lotteryUnclaimedPrizes(9 % 7);
+        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(9 % 7);
 
         if (winner != address(0)) {
             // Winner claims prize
-            uint256 winnerBalanceBefore = etherium.balanceOf(winner);
+            uint256 winnerBalanceBefore = monstr.balanceOf(winner);
 
             vm.prank(winner);
-            etherium.claim();
+            monstr.claim();
 
-            uint256 winnerBalanceAfter = etherium.balanceOf(winner);
+            uint256 winnerBalanceAfter = monstr.balanceOf(winner);
 
             // Verify prize was transferred
             assertEq(winnerBalanceAfter - winnerBalanceBefore, amount, "Winner should receive prize amount");
 
             // Verify prize is marked as claimed
-            (address winnerAfterClaim, uint112 amountAfterClaim) = etherium.lotteryUnclaimedPrizes(9 % 7);
+            (address winnerAfterClaim, uint112 amountAfterClaim) = monstr.lotteryUnclaimedPrizes(9 % 7);
             assertEq(winnerAfterClaim, address(0), "Prize should be marked as claimed");
             assertEq(amountAfterClaim, 0, "Prize amount should be zero after claim");
         } else {
@@ -470,24 +470,24 @@ contract EtheriumLotteryTest is EtheriumTestBase {
     }
 
     function testNoContractsInLottery() public {
-        // Deploy a contract that holds ETHERIUM
+        // Deploy a contract that holds MONSTR
         MockContract mockContract = new MockContract();
         vm.deal(address(mockContract), 10 ether);
 
-        // Contract mints ETHERIUM
-        mockContract.mintEtherium(etherium);
+        // Contract mints MONSTR
+        mockContract.mintStrategy(monstr);
 
         // Check contract is not tracked as holder
-        assertFalse(etherium.isHolder(address(mockContract)));
-        assertEq(etherium.getHolderCount(), 0);
+        assertFalse(monstr.isHolder(address(mockContract)));
+        assertEq(monstr.getHolderCount(), 0);
 
         // Regular user mints
         vm.prank(alice);
-        etherium.mint{value: 1 ether}();
+        monstr.mint{value: 1 ether}();
 
         // Only alice should be tracked
-        assertEq(etherium.getHolderCount(), 1);
-        assertTrue(etherium.isHolder(alice));
+        assertEq(monstr.getHolderCount(), 1);
+        assertTrue(monstr.isHolder(alice));
     }
 
     function testLotteryWithManyUsersRandomOperations() public {
@@ -500,7 +500,7 @@ contract EtheriumLotteryTest is EtheriumTestBase {
             // Each user mints different amount
             uint256 mintAmount = (i % 3 + 1) * 0.5 ether;
             vm.prank(user);
-            etherium.mint{value: mintAmount}();
+            monstr.mint{value: mintAmount}();
         }
 
         // Move past minting period
@@ -514,21 +514,21 @@ contract EtheriumLotteryTest is EtheriumTestBase {
             address from = address(uint160(0x1000 + (i % userCount)));
             address to = address(uint160(0x1000 + ((i + 3) % userCount)));
 
-            uint256 balance = etherium.balanceOf(from);
+            uint256 balance = monstr.balanceOf(from);
             if (balance > 100 ether) {
                 vm.prank(from);
-                etherium.transfer(to, 100 ether);
+                monstr.transfer(to, 100 ether);
             }
         }
 
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(987654)));
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Verify lottery or auction executed
-        (address winner, uint112 prizeAmount) = etherium.lotteryUnclaimedPrizes(9 % 7);
-        (address bidder,,, uint112 auctionAmount,) = etherium.currentAuction();
+        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(9 % 7);
+        (address bidder,,, uint112 auctionAmount,) = monstr.currentAuction();
 
         // Should have either lottery or auction
         assertTrue(winner != address(0) || auctionAmount > 0, "Should have executed lottery or auction");

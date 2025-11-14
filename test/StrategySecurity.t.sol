@@ -2,17 +2,63 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Etherium} from "../src/Etherium.sol";
+import {Strategy, IWMON} from "../src/Strategy.sol";
 
-contract EtheriumSecurityTest is Test {
-    Etherium public etherium;
+// Mock WMON for testing
+contract MockWMON {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        (bool success,) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        return true;
+    }
+
+    receive() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+}
+
+contract StrategySecurityTest is Test {
+    Strategy public monstr;
+    MockWMON public wmon;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
     address public charlie = address(0x3);
 
     function setUp() public {
-        etherium = new Etherium();
+        wmon = new MockWMON();
+        monstr = new Strategy(address(wmon));
 
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -23,45 +69,45 @@ contract EtheriumSecurityTest is Test {
 
     function testMintZeroETH() public {
         vm.prank(alice);
-        vm.expectRevert("Must send ETH");
-        etherium.mint{value: 0}();
+        vm.expectRevert("Must send MON");
+        monstr.mint{value: 0}();
     }
 
     function testRedeemZeroAmount() public {
         vm.prank(alice);
-        etherium.mint{value: 1 ether}();
+        monstr.mint{value: 1 ether}();
 
         vm.prank(alice);
         vm.expectRevert("Amount must be greater than 0");
-        etherium.redeem(0);
+        monstr.redeem(0);
     }
 
     function testTransferZeroAmount() public {
         vm.prank(alice);
-        etherium.mint{value: 1 ether}();
+        monstr.mint{value: 1 ether}();
 
         // Zero transfers should work per ERC20 spec
         vm.prank(alice);
-        bool success = etherium.transfer(bob, 0);
+        bool success = monstr.transfer(bob, 0);
         assertTrue(success, "Zero transfer should succeed");
 
         // But no fees should be taken
-        assertEq(etherium.balanceOf(alice), 990 ether);
+        assertEq(monstr.balanceOf(alice), 990 ether);
     }
 
     // ============ Self Operations ============
 
     function testSelfTransferFees() public {
         vm.prank(alice);
-        etherium.mint{value: 1 ether}();
+        monstr.mint{value: 1 ether}();
 
-        uint256 balanceBefore = etherium.balanceOf(alice);
+        uint256 balanceBefore = monstr.balanceOf(alice);
 
         // Self transfer should still charge fees
         vm.prank(alice);
-        etherium.transfer(alice, 100 ether);
+        monstr.transfer(alice, 100 ether);
 
-        uint256 balanceAfter = etherium.balanceOf(alice);
+        uint256 balanceAfter = monstr.balanceOf(alice);
         assertEq(balanceBefore - balanceAfter, 1 ether, "Should charge 1% fee even on self-transfer");
     }
 
@@ -70,56 +116,56 @@ contract EtheriumSecurityTest is Test {
     function testRedeemWithInsufficientContractETH() public {
         // Mint tokens
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Alice redeems all her tokens (9900 not 990)
         vm.prank(alice);
-        etherium.redeem(9900 ether);
+        monstr.redeem(9900 ether);
 
         // Bob tries to redeem but contract has insufficient ETH
         // After Alice's redemption: contract has ~10.1 ETH left
         // Bob tries to redeem 9900 tokens which needs ~9.9 ETH
         // Should succeed
         vm.prank(bob);
-        etherium.redeem(9900 ether);
+        monstr.redeem(9900 ether);
 
         // Verify contract is nearly empty
-        assertTrue(address(etherium).balance < 1 ether, "Contract should be nearly empty");
+        assertTrue(address(monstr).balance < 1 ether, "Contract should be nearly empty");
     }
 
     // ============ Max Supply Tests ============
 
     function testMaxSupplyEnforcement() public {
-        // Mint during minting period (100 ETH = 100,000 ETHERIUM total, alice gets 99,000 after 1% fee)
+        // Mint during minting period (100 ETH = 100,000 MONSTR total, alice gets 99,000 after 1% fee)
         vm.prank(alice);
-        etherium.mint{value: 100 ether}();
+        monstr.mint{value: 100 ether}();
 
         // Fast forward past minting period
         vm.warp(block.timestamp + 8 days);
 
         // First burn some tokens to create capacity (this also sets max supply)
         vm.prank(alice);
-        etherium.redeem(1000 ether); // Burn 1000 tokens (990 net after fee)
+        monstr.redeem(1000 ether); // Burn 1000 tokens (990 net after fee)
 
-        // Max supply should now be set to original total supply (100,000 ETHERIUM)
-        uint256 maxSupply = etherium.maxSupplyEver();
+        // Max supply should now be set to original total supply (100,000 MONSTR)
+        uint256 maxSupply = monstr.maxSupplyEver();
         assertGt(maxSupply, 0, "Max supply should be set");
-        assertEq(maxSupply, 100000 ether, "Max supply should be 100,000 ETHERIUM");
+        assertEq(maxSupply, 100000 ether, "Max supply should be 100,000 MONSTR");
 
-        // Current supply is now ~99,010 ETHERIUM (100,000 - 990 burned)
-        // With proportional minting, we can mint up to ~990 ETHERIUM
+        // Current supply is now ~99,010 MONSTR (100,000 - 990 burned)
+        // With proportional minting, we can mint up to ~990 MONSTR
 
         // Small mint should succeed
         vm.prank(bob);
-        etherium.mint{value: 0.9 ether}(); // Should succeed
+        monstr.mint{value: 0.9 ether}(); // Should succeed
 
         // Try to mint again when we're close to max supply - should fail
         vm.prank(bob);
         vm.expectRevert("Max supply reached");
-        etherium.mint{value: 0.1 ether}(); // This would push us over max supply
+        monstr.mint{value: 0.1 ether}(); // This would push us over max supply
     }
 
     // ============ Timing Tests ============
@@ -127,46 +173,46 @@ contract EtheriumSecurityTest is Test {
     function testTimestampManipulationResistance() public {
         // The 25-hour pseudo-days make it harder to game timing
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Fast forward to just before day 2
         vm.warp(block.timestamp + 50 hours - 1);
 
         // Should still be day 1
-        uint256 day = etherium.getCurrentDay();
+        uint256 day = monstr.getCurrentDay();
         assertEq(day, 1, "Should still be day 1");
 
         // Fast forward 2 seconds
         vm.warp(block.timestamp + 2);
 
         // Now should be day 2
-        day = etherium.getCurrentDay();
+        day = monstr.getCurrentDay();
         assertEq(day, 2, "Should be day 2");
     }
 
     function testPreventDoubleLotteryExecution() public {
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 5 ether}();
+        monstr.mint{value: 5 ether}();
 
         // Move past minting period
         vm.warp(block.timestamp + 8 days);
 
         // Generate fees on day 8
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         // Fast forward to day 9 to execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Execute lottery once
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Try to execute again
         vm.expectRevert("No pending lottery/auction (same day)");
-        etherium.executeLottery();
+        monstr.executeLottery();
     }
 
     // ============ Large Number Tests ============
@@ -177,14 +223,14 @@ contract EtheriumSecurityTest is Test {
 
         vm.deal(alice, largeAmount + 1 ether);
         vm.prank(alice);
-        etherium.mint{value: largeAmount}();
+        monstr.mint{value: largeAmount}();
 
         // Check fee calculation didn't overflow
         uint256 expectedTokens = largeAmount * 990; // 9,900,000 tokens with 18 decimals
-        assertEq(etherium.balanceOf(alice), expectedTokens, "Should receive correct amount");
+        assertEq(monstr.balanceOf(alice), expectedTokens, "Should receive correct amount");
 
         uint256 expectedFee = largeAmount * 10; // 100,000 tokens fee with 18 decimals
-        assertEq(etherium.balanceOf(etherium.FEES_POOL()), expectedFee, "Fee should be correct");
+        assertEq(monstr.balanceOf(monstr.FEES_POOL()), expectedFee, "Fee should be correct");
     }
 
     // ============ Public Goods Tests ============
@@ -197,19 +243,19 @@ contract EtheriumSecurityTest is Test {
         // When public good rejects, prize should go to current winner
 
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 5 ether}();
+        monstr.mint{value: 5 ether}();
 
         // Generate some transfer fees on day 8
         vm.warp(block.timestamp + 8 days);
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether); // 10 ETHERIUM fee
+        monstr.transfer(bob, 1000 ether); // 10 MONSTR fee
 
         // Day 9 - Execute lottery/auction for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // After minting period, days alternate between lottery and auction
         // Day 8 fees might go to auction, not lottery
@@ -217,28 +263,28 @@ contract EtheriumSecurityTest is Test {
 
         // Generate fees on day 9
         vm.prank(bob);
-        etherium.transfer(alice, 500 ether); // 5 ETHERIUM fee
+        monstr.transfer(alice, 500 ether); // 5 MONSTR fee
 
         // Day 10 - Execute for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Now check for a winner - try both slots
-        (address winner1, uint112 amount1) = etherium.lotteryUnclaimedPrizes(9 % 7);
+        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(9 % 7);
         if (winner1 == address(0)) {
             // Try slot 8 if 9 is empty
-            (winner1, amount1) = etherium.lotteryUnclaimedPrizes(8 % 7);
+            (winner1, amount1) = monstr.lotteryUnclaimedPrizes(8 % 7);
         }
         assertTrue(winner1 != address(0), "Should have winner");
         assertTrue(amount1 > 0, "Should have prize amount");
         
         // Store the unclaimed prize amount for later verification
         uint256 unclaimedPrizeAmount = amount1;
-        (address checkWinner,) = etherium.lotteryUnclaimedPrizes(9 % 7);
+        (address checkWinner,) = monstr.lotteryUnclaimedPrizes(9 % 7);
         uint256 slotToOverwrite = (winner1 == checkWinner) ? 9 % 7 : 8 % 7;
 
         // Get the first public good address to track its balance
-        address firstPublicGood = etherium.PUBLIC_GOODS(0);
+        address firstPublicGood = monstr.PUBLIC_GOODS(0);
         uint256 publicGoodBalanceBefore = firstPublicGood.balance;
         
         // Fast forward 7 days to overwrite the slot with unclaimed prize
@@ -246,31 +292,31 @@ contract EtheriumSecurityTest is Test {
         for (uint256 i = 0; i < 7; i++) {
             // Generate fees for the current day
             vm.prank(alice);
-            etherium.transfer(bob, 100 ether);
+            monstr.transfer(bob, 100 ether);
 
             // Move to next day and execute lottery
             vm.warp(block.timestamp + 25 hours + 61);
-            etherium.executeLottery();
+            monstr.executeLottery();
         }
         
         // Check if public good received ETH
         uint256 publicGoodBalanceAfter = firstPublicGood.balance;
         uint256 ethSent = publicGoodBalanceAfter - publicGoodBalanceBefore;
         
-        // CRITICAL: The public good should receive ETH equal to the backing value of the ETHERIUM prize
-        // The correct conversion should be: ethAmount = (etheriumAmount * contractETHBalance) / totalSupply
+        // CRITICAL: The public good should receive ETH equal to the backing value of the MONSTR prize
+        // The correct conversion should be: ethAmount = (monstrAmount * contractETHBalance) / totalSupply
         
         // Log the values for debugging
-        console.log("Unclaimed ETHERIUM prize:", unclaimedPrizeAmount);
+        console.log("Unclaimed MONSTR prize:", unclaimedPrizeAmount);
         console.log("Actual ETH sent:", ethSent);
         
-        // The bug has been fixed! Now the contract correctly converts ETHERIUM to ETH
+        // The bug has been fixed! Now the contract correctly converts MONSTR to ETH
         // The exact amount depends on when the conversion happens (contract balance and supply change over time)
-        // But it should be much less than the ETHERIUM amount (roughly 1000x less during minting period)
+        // But it should be much less than the MONSTR amount (roughly 1000x less during minting period)
         
-        // Verify that ETH was sent and it's a reasonable amount (not the full ETHERIUM amount)
+        // Verify that ETH was sent and it's a reasonable amount (not the full MONSTR amount)
         assertTrue(ethSent > 0, "Should have sent some ETH to public good");
-        assertTrue(ethSent < unclaimedPrizeAmount / 100, "ETH sent should be much less than ETHERIUM amount (proper conversion)");
+        assertTrue(ethSent < unclaimedPrizeAmount / 100, "ETH sent should be much less than MONSTR amount (proper conversion)");
     }
 
     // ============ Fenwick Tree Consistency ============
@@ -286,7 +332,7 @@ contract EtheriumSecurityTest is Test {
         // Mint for all users
         for (uint256 i = 0; i < 20; i++) {
             vm.prank(users[i]);
-            etherium.mint{value: 1 ether}();
+            monstr.mint{value: 1 ether}();
         }
 
         // Move past minting period to ensure fees go to pool
@@ -298,15 +344,15 @@ contract EtheriumSecurityTest is Test {
             uint256 to = (i + 7) % 20;
             uint256 amount = 100 ether * ((i % 5) + 1);
 
-            if (etherium.balanceOf(users[from]) >= amount) {
+            if (monstr.balanceOf(users[from]) >= amount) {
                 vm.prank(users[from]);
-                etherium.transfer(users[to], amount);
+                monstr.transfer(users[to], amount);
             }
         }
 
         // System should still be consistent - verify by executing lottery
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery(); // Should not revert
+        monstr.executeLottery(); // Should not revert
     }
 }
 

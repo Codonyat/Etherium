@@ -2,26 +2,26 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Etherium} from "../src/Etherium.sol";
+import {Strategy, IWMON} from "../src/Strategy.sol";
 
 // Malicious contract that mints in constructor to bypass exclusion
 contract ConstructorMinter {
-    Etherium public etherium;
+    Strategy public monstr;
     
-    constructor(Etherium _etherium) payable {
-        etherium = _etherium;
+    constructor(Strategy _monstr) payable {
+        monstr = _monstr;
         // During constructor, code.length == 0, so we bypass contract exclusion
         if (msg.value > 0) {
-            etherium.mint{value: msg.value}();
+            monstr.mint{value: msg.value}();
         }
     }
     
     function transfer(address to, uint256 amount) external {
-        etherium.transfer(to, amount);
+        monstr.transfer(to, amount);
     }
     
     function getBalance() external view returns (uint256) {
-        return etherium.balanceOf(address(this));
+        return monstr.balanceOf(address(this));
     }
 }
 
@@ -44,15 +44,61 @@ contract Create2Deployer {
     }
 }
 
-contract EtheriumFenwickCorruptionTest is Test {
-    Etherium public etherium;
+// Mock WMON for testing
+contract MockWMON {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        (bool success,) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        return true;
+    }
+
+    receive() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+}
+
+contract StrategyFenwickCorruptionTest is Test {
+    Strategy public monstr;
+    MockWMON public wmon;
     Create2Deployer public deployer;
-    
+
     address public alice = address(0x1);
     address public bob = address(0x2);
-    
+
     function setUp() public {
-        etherium = new Etherium();
+        wmon = new MockWMON();
+        monstr = new Strategy(address(wmon));
         deployer = new Create2Deployer();
         
         vm.deal(alice, 100 ether);
@@ -62,7 +108,7 @@ contract EtheriumFenwickCorruptionTest is Test {
     function testConstructorBypassPrevented() public {
         // Deploy malicious contract that mints in constructor
         vm.deal(address(this), 10 ether);
-        ConstructorMinter malicious = new ConstructorMinter{value: 10 ether}(etherium);
+        ConstructorMinter malicious = new ConstructorMinter{value: 10 ether}(monstr);
         
         // The contract should have tokens
         uint256 contractBalance = malicious.getBalance();
@@ -70,18 +116,18 @@ contract EtheriumFenwickCorruptionTest is Test {
         console.log("Contract balance:", contractBalance);
         
         // Check if contract is in holder list (it might be due to constructor bypass)
-        uint256 holderCount = etherium.getHolderCount();
+        uint256 holderCount = monstr.getHolderCount();
         console.log("Holder count after constructor mint:", holderCount);
         
         // Now the contract transfers tokens - this should update Fenwick tree properly
         // With the fix, the tree should be updated even though it's a contract
-        uint256 initialFenwick = etherium.getSuffixSum(1);
+        uint256 initialFenwick = monstr.getSuffixSum(1);
         console.log("Initial Fenwick sum:", initialFenwick);
         
         // Contract transfers some tokens
         malicious.transfer(alice, 1000 ether);
         
-        uint256 afterTransferFenwick = etherium.getSuffixSum(1);
+        uint256 afterTransferFenwick = monstr.getSuffixSum(1);
         console.log("Fenwick sum after transfer:", afterTransferFenwick);
         
         // The Fenwick tree should be properly updated
@@ -97,18 +143,18 @@ contract EtheriumFenwickCorruptionTest is Test {
         malicious.transfer(bob, remainingBalance);
         
         // After transferring all, contract should be removed from holders
-        uint256 finalFenwick = etherium.getSuffixSum(1);
+        uint256 finalFenwick = monstr.getSuffixSum(1);
         console.log("Final Fenwick sum:", finalFenwick);
         
         // Fenwick should only track Alice and Bob now
-        uint256 expectedTotal = etherium.balanceOf(alice) + etherium.balanceOf(bob);
+        uint256 expectedTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
         assertEq(finalFenwick, expectedTotal, "Fenwick should only track EOA balances");
     }
     
     function testCreate2PrefundingAttackPrevented() public {
         // Compute the CREATE2 address for a future contract
         bytes memory bytecode = type(ConstructorMinter).creationCode;
-        bytes memory constructorArgs = abi.encode(address(etherium));
+        bytes memory constructorArgs = abi.encode(address(monstr));
         bytes memory fullBytecode = abi.encodePacked(bytecode, constructorArgs);
         bytes32 salt = keccak256("test");
         
@@ -117,18 +163,18 @@ contract EtheriumFenwickCorruptionTest is Test {
         
         // Alice mints tokens
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
         
         // Alice sends tokens to the future contract address (before deployment)
         vm.prank(alice);
-        etherium.transfer(futureContract, 5000 ether);
+        monstr.transfer(futureContract, 5000 ether);
         
         // The future address should be in the Fenwick tree as an EOA
-        uint256 holderCountBefore = etherium.getHolderCount();
+        uint256 holderCountBefore = monstr.getHolderCount();
         console.log("Holder count before deployment:", holderCountBefore);
         
         // Check Fenwick tree includes the future contract
-        uint256 fenwickBefore = etherium.getSuffixSum(1);
+        uint256 fenwickBefore = monstr.getSuffixSum(1);
         console.log("Fenwick sum before deployment:", fenwickBefore);
         
         // Now deploy the contract at that address
@@ -145,7 +191,7 @@ contract EtheriumFenwickCorruptionTest is Test {
         // With the fix, when the contract transfers tokens, Fenwick should update
         deployedContract.transfer(bob, 1000 ether);
         
-        uint256 fenwickAfter = etherium.getSuffixSum(1);
+        uint256 fenwickAfter = monstr.getSuffixSum(1);
         console.log("Fenwick sum after contract transfer:", fenwickAfter);
         
         // The deployed contract minted 4950 tokens in its constructor, getting added to tree
@@ -160,43 +206,43 @@ contract EtheriumFenwickCorruptionTest is Test {
         }
         
         // Final check - Fenwick should only track EOAs
-        uint256 finalFenwick = etherium.getSuffixSum(1);
-        uint256 expectedTotal = etherium.balanceOf(alice) + etherium.balanceOf(bob);
+        uint256 finalFenwick = monstr.getSuffixSum(1);
+        uint256 expectedTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
         assertEq(finalFenwick, expectedTotal, "Final Fenwick should only track EOAs");
     }
     
     function testContractExclusionStillWorksNormally() public {
         // Normal case: deploy contract first, then try to mint
         // First deploy with no ETH in constructor
-        ConstructorMinter normalContract = new ConstructorMinter{value: 0}(etherium);
+        ConstructorMinter normalContract = new ConstructorMinter{value: 0}(monstr);
         
         // Contract tries to mint after deployment (not in constructor)
         vm.deal(address(normalContract), 5 ether);
         vm.prank(address(normalContract));
-        etherium.mint{value: 5 ether}();
+        monstr.mint{value: 5 ether}();
         
         // Contract should have tokens but NOT be in Fenwick tree
-        uint256 contractBalance = etherium.balanceOf(address(normalContract));
+        uint256 contractBalance = monstr.balanceOf(address(normalContract));
         assertGt(contractBalance, 0, "Contract should have tokens");
         
         // Check holder count - contract should not be counted
-        uint256 holderCount = etherium.getHolderCount();
+        uint256 holderCount = monstr.getHolderCount();
         assertEq(holderCount, 0, "No holders should be tracked (only contract has tokens)");
         
         // Fenwick tree should be empty
-        uint256 fenwickSum = etherium.getSuffixSum(1);
+        uint256 fenwickSum = monstr.getSuffixSum(1);
         assertEq(fenwickSum, 0, "Fenwick should not track contract balance");
         
         // Even after transfers, contract should not enter Fenwick tree
         vm.prank(address(normalContract));
-        etherium.transfer(alice, 1000 ether);
+        monstr.transfer(alice, 1000 ether);
         
         // Now Alice should be tracked
-        holderCount = etherium.getHolderCount();
+        holderCount = monstr.getHolderCount();
         assertEq(holderCount, 1, "Only Alice should be tracked");
         
-        fenwickSum = etherium.getSuffixSum(1);
-        assertEq(fenwickSum, etherium.balanceOf(alice), "Fenwick should only track Alice");
+        fenwickSum = monstr.getSuffixSum(1);
+        assertEq(fenwickSum, monstr.balanceOf(alice), "Fenwick should only track Alice");
     }
     
     function testPhantomEntriesProperlyCleanedUp() public {
@@ -204,10 +250,10 @@ contract EtheriumFenwickCorruptionTest is Test {
         vm.deal(address(this), 20 ether);
         
         // Deploy multiple malicious contracts that mint in constructor
-        ConstructorMinter mal1 = new ConstructorMinter{value: 5 ether}(etherium);
-        ConstructorMinter mal2 = new ConstructorMinter{value: 5 ether}(etherium);
+        ConstructorMinter mal1 = new ConstructorMinter{value: 5 ether}(monstr);
+        ConstructorMinter mal2 = new ConstructorMinter{value: 5 ether}(monstr);
         
-        uint256 initialHolderCount = etherium.getHolderCount();
+        uint256 initialHolderCount = monstr.getHolderCount();
         console.log("Initial holder count:", initialHolderCount);
         
         // Both contracts transfer to create EOA holders
@@ -215,9 +261,9 @@ contract EtheriumFenwickCorruptionTest is Test {
         mal2.transfer(bob, 2000 ether);
         
         // Check Fenwick consistency
-        uint256 fenwickSum = etherium.getSuffixSum(1);
-        uint256 actualTotal = etherium.balanceOf(alice) + 
-                             etherium.balanceOf(bob) + 
+        uint256 fenwickSum = monstr.getSuffixSum(1);
+        uint256 actualTotal = monstr.balanceOf(alice) + 
+                             monstr.balanceOf(bob) + 
                              mal1.getBalance() + 
                              mal2.getBalance();
         
@@ -232,12 +278,12 @@ contract EtheriumFenwickCorruptionTest is Test {
         mal2.transfer(bob, mal2.getBalance());
         
         // Final state should only have EOAs
-        uint256 finalFenwick = etherium.getSuffixSum(1);
-        uint256 eoaTotal = etherium.balanceOf(alice) + etherium.balanceOf(bob);
+        uint256 finalFenwick = monstr.getSuffixSum(1);
+        uint256 eoaTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
         assertEq(finalFenwick, eoaTotal, "Final Fenwick should only track EOAs");
         
         // Holder count should reflect only EOAs
-        uint256 finalHolderCount = etherium.getHolderCount();
+        uint256 finalHolderCount = monstr.getHolderCount();
         assertEq(finalHolderCount, 2, "Should only have 2 EOA holders");
     }
 }

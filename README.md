@@ -1,12 +1,12 @@
-# Etherium
+# Strategy
 
-An ERC20 token backed by ETH with daily lotteries and auctions.
+An ERC20 token backed by MON with daily lotteries and auctions.
 
 ## Overview
 
-Etherium is a collectible ERC20 token where:
+Strategy is a collectible ERC20 token where:
 
-- 1 ETH mints 1000 ETHERIUM (minus 1% fee)
+- 1 MON mints 1000 MONSTR (minus 1% fee)
 - All operations have a 1% fee that funds daily lotteries and auctions
 - Random holders win lottery prizes proportional to their holdings
 - After day 7, supply becomes fixed at the total minted
@@ -17,8 +17,8 @@ Etherium is a collectible ERC20 token where:
 
 - **Days 0-6**: Unlimited minting at 1:1000 ratio
 - **Day 7+**: Can only mint if someone redeems (burns) tokens first
-- Redeem ETHERIUM for ETH anytime at contract's ETH balance / total supply ratio (1% fee applies)
-- Redemption value increases as auctions bring in ETH at market prices
+- Redeem MONSTR for MON anytime at contract's MON balance / total supply ratio (1% fee applies)
+- Redemption value increases as auctions bring in MON at market prices
 
 ### Daily Distribution
 
@@ -28,9 +28,9 @@ Etherium is a collectible ERC20 token where:
 
 ### Auctions
 
-- Use WETH for bidding (prevents DoS attacks)
+- Use WMON for bidding (prevents DoS attacks)
 - 10% minimum bid increment
-- Winners receive ETHERIUM tokens
+- Winners receive MONSTR tokens
 
 ## Technical Details
 

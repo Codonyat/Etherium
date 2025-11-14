@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IWETH} from "../../src/Etherium.sol";
+import {IWMON} from "../.././src/Strategy.sol";
 
-contract MockWETH {
+contract MockWMON {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -57,22 +57,19 @@ contract MockWETH {
 
 import {Test} from "forge-std/Test.sol";
 
-abstract contract WETHTestBase is Test {
-    IWETH public weth;
+abstract contract WMONTestBase is Test {
+    IWMON public wmon;
 
-    function setupWETH() internal {
-        // Deploy mock WETH at the expected address
-        MockWETH mockWeth = new MockWETH();
-        bytes memory deployedCode = address(mockWeth).code;
-        address wethAddress = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-        vm.etch(wethAddress, deployedCode);
-        weth = IWETH(wethAddress);
+    function setupWMON() internal {
+        // Deploy mock WETH for tests that don't inherit from StrategyTestBase
+        MockWMON mockWeth = new MockWMON();
+        wmon = IWMON(address(mockWeth));
     }
 
-    function getWETHAndApprove(address user, address spender, uint256 amount) internal {
+    function getWMONAndApprove(address user, address spender, uint256 amount) internal {
         vm.startPrank(user);
-        weth.deposit{value: amount}();
-        weth.approve(spender, amount);
+        wmon.deposit{value: amount}();
+        wmon.approve(spender, amount);
         vm.stopPrank();
     }
 }

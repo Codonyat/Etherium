@@ -1,0 +1,658 @@
+8c8
+< interface IWMON {
+
+---
+
+> interface IWETH {
+> 18,21c18,21
+> < _ @title Strategy
+> < _ @dev ERC20 token backed by MON with daily lottery and auction mechanics
+> < \* - During 7-day minting period: 1 MON = 1000 Strategy (both 18 decimals)
+
+## < _ - Redemption: Proportional share of contract's MON (Strategy _ MON balance / total supply)
+
+> - @title Etherium
+> - @dev ERC20 token backed by ETH with daily lottery and auction mechanics
+> - - During 7-day minting period: 1 ETH = 1000 ETHERIUM (both 18 decimals)
+> - - Redemption: Proportional share of contract's ETH (ETHERIUM _ ETH balance / total supply)
+>     24,25c24,25
+>     < _ - Daily auctions using WMON to prevent DoS attacks
+
+## < \* - Users can lock community tokens during minting period to mint without fees (optional)
+
+> - - Daily auctions using WETH to prevent DoS attacks
+> - - Users can lock 100 PepeUSD during minting period to mint without fees
+>     29,30c29,30
+>     < contract Strategy is ERC20, ReentrancyGuardTransient {
+
+## < // Conversion: 1 MON = 1000 Strategy during minting period (both 18 decimals)
+
+> contract Etherium is ERC20, ReentrancyGuardTransient {
+> // Conversion: 1 ETH = 1000 ETHERIUM during minting period (both 18 decimals)
+> 35,36c35,36
+> < uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e6; // 100 tokens (assumes 6 decimals, adjust if needed)
+
+## < uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 30 days; // 1 month from deployment
+
+>     uint256 public constant PEPEUSD_LOCK_AMOUNT = 100e6; // 100 PepeUSD (6 decimals)
+>     uint256 public constant PEPEUSD_UNLOCK_TIME = 30 days; // 1 month from deployment
+>
+> 48c48
+
+## < uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion Strategy with 18 decimals)
+
+>     uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion ETHERIUM with 18 decimals)
+>
+> 53c53
+
+## < uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 Strategy) to run lottery/auction
+
+>     uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 ETHERIUM) to run lottery/auction
+>
+> 62c62
+
+## < uint112 amount; // 112 bits (Strategy amount for prizes)
+
+>         uint112 amount; // 112 bits (ETHERIUM amount for prizes)
+>
+> 101,109c101,107
+> < // Community token integration
+> < // Set this to address(0) to disable fee-free minting feature
+> < // Or set to your community token address before deployment
+> < IERC20 public constant COMMUNITY_TOKEN = IERC20(address(0));
+> <
+> < // WMON integration for auctions
+> < // Monad Mainnet WMON: 0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A
+> < // Monad Testnet WMON: 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701
+
+## < IWMON public immutable wmon;
+
+>     // PepeUSD integration
+>     IERC20 public constant PEPEUSD =
+>         IERC20(0xed7fd16423Bc19b9143313ac5E4B7F731D714e97);
+>
+>     // WETH integration for auctions (mainnet address)
+>     IWETH public constant WETH =
+>         IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+>
+> 111,112c109,110
+> < // Track community tokens locked per user during minting period
+
+## < mapping(address user => uint256 amount) public communityTokenLocked;
+
+>     // Track PepeUSD locked per user during minting period
+>     mapping(address user => uint256 amount) public pepeUSDLocked;
+>
+> 116,117c114,115
+> < uint256 monAmount,
+
+## < uint256 stratAmount,
+
+>         uint256 ethAmount,
+>         uint256 etheriumAmount,
+>
+> 122,123c120,121
+> < uint256 stratAmount,
+
+## < uint256 monAmount,
+
+>         uint256 etheriumAmount,
+>         uint256 ethAmount,
+>
+> 133c131
+
+## < event CommunityTokenLocked(
+
+>     event PepeUSDLocked(
+>
+> 135,136c133,134
+> < uint256 tokenAmount,
+
+## < uint256 stratMinted,
+
+>         uint256 pepeAmount,
+>         uint256 etheriumMinted,
+>
+> 139c137
+
+## < event CommunityTokenUnlocked(address indexed user, uint256 amount);
+
+>     event PepeUSDUnlocked(address indexed user, uint256 amount);
+>
+> 142c140
+
+## < event AuctionStarted(uint256 day, uint256 stratAmount, uint256 minBid);
+
+>     event AuctionStarted(uint256 day, uint256 etheriumAmount, uint256 minBid);
+>
+> 147,148c145,146
+> < uint256 stratAmount,
+
+## < uint256 monPaid,
+
+>         uint256 etheriumAmount,
+>         uint256 ethPaid,
+>
+> 156,158c154,156
+> < uint96 currentBid; // 96 bits - WMON amount bid
+> < uint96 minBid; // 96 bits - Minimum bid required (in WMON)
+
+## < uint112 monstrAmount; // 112 bits - Strategy amount being auctioned
+
+>         uint96 currentBid; // 96 bits - WETH amount bid
+>         uint96 minBid; // 96 bits - Minimum bid required (in WETH)
+>         uint112 etheriumAmount; // 112 bits - ETHERIUM amount being auctioned
+>
+> 164,167c162
+> < /\*_
+> < _ @param \_wmon Address of WMON token for auctions
+> < \*/
+
+## < constructor(address \_wmon) ERC20("Strategy", "STRAT") {
+
+>     constructor() ERC20("Etherium", "ETHERIUM") {
+>
+> 170d164
+> < wmon = IWMON(\_wmon);
+> 183c177
+
+## < // 1:1 conversion - max supply equals total Strategy minted
+
+>             // 1:1 conversion - max supply equals total ETHERIUM minted
+>
+> 189c183
+
+## < \* @dev Accept MON from anyone - donations benefit all token holders proportionally
+
+>      * @dev Accept ETH from anyone - donations benefit all token holders proportionally
+>
+> 192c186
+
+## < // Accept all MON transfers with no data
+
+>         // Accept all ETH transfers with no data
+>
+> 194c188
+
+## < // 1. WMON withdrawals for auctions
+
+>         // 1. WETH withdrawals for auctions
+>
+> 200,201c194,195
+> < \* @dev Mint Strategy by depositing MON (standard minting with fees)
+
+## < \* During minting period: 1 MON = 1000 Strategy
+
+>      * @dev Mint ETHERIUM by depositing ETH (standard minting with fees)
+>      * During minting period: 1 ETH = 1000 ETHERIUM
+>
+> 205c199
+
+## < require(msg.value > 0, "Must send MON");
+
+>         require(msg.value > 0, "Must send ETH");
+>
+> 213c207
+
+## < uint256 monstrToMint;
+
+>         uint256 etheriumToMint;
+>
+> 215c209
+
+## < uint256 netMONSTR;
+
+>         uint256 netEtherium;
+>
+> 219c213
+
+## < // During minting period: 1 MON = 1000 Strategy
+
+>             // During minting period: 1 ETH = 1000 ETHERIUM
+>
+> 221c215
+
+## < monstrToMint = msg.value \* 1000;
+
+>             etheriumToMint = msg.value * 1000;
+>
+> 223,226c217,220
+> < // After minting period: proportional to MON/supply ratio
+> < uint256 monBalance = address(this).balance - msg.value; // Exclude sent MON
+> < if (totalSupply() > 0 && monBalance > 0) {
+
+## < // Mint proportionally to maintain MON backing ratio
+
+>             // After minting period: proportional to ETH/supply ratio
+>             uint256 ethBalance = address(this).balance - msg.value; // Exclude sent ETH
+>             if (totalSupply() > 0 && ethBalance > 0) {
+>                 // Mint proportionally to maintain ETH backing ratio
+>
+> 229c223
+
+## < monstrToMint = (msg.value \* totalSupply()) / monBalance;
+
+>                 etheriumToMint = (msg.value * totalSupply()) / ethBalance;
+>
+> 231c225
+
+## < // Fallback to 1000:1 if no supply or MON
+
+>                 // Fallback to 1000:1 if no supply or ETH
+>
+> 233c227
+
+## < monstrToMint = msg.value \* 1000;
+
+>                 etheriumToMint = msg.value * 1000;
+>
+> 237c231
+
+## < totalSupply() + monstrToMint <= maxSupplyEver,
+
+>                 totalSupply() + etheriumToMint <= maxSupplyEver,
+>
+> 240c234
+
+## < require(monstrToMint >= 100, "Minimum mint amount is 100 wei");
+
+>             require(etheriumToMint >= 100, "Minimum mint amount is 100 wei");
+>
+> 244c238
+
+## < // Overflow safety: monstrToMint <= maxSupplyEver < 2^112, FEE_PERCENT = 100 < 2^7
+
+>         // Overflow safety: etheriumToMint <= maxSupplyEver < 2^112, FEE_PERCENT = 100 < 2^7
+>
+> 246,247c240,241
+> < fee = (monstrToMint \* FEE_PERCENT) / BASIS_POINTS;
+
+## < netMONSTR = monstrToMint - fee;
+
+>         fee = (etheriumToMint * FEE_PERCENT) / BASIS_POINTS;
+>         netEtherium = etheriumToMint - fee;
+>
+> 250c244
+
+## < \_mint(msg.sender, netMONSTR);
+
+>         _mint(msg.sender, netEtherium);
+>
+> 257c251
+
+## < emit Minted(msg.sender, msg.value, netMONSTR, fee);
+
+>         emit Minted(msg.sender, msg.value, netEtherium, fee);
+>
+> 261,264c255,257
+> < _ @dev Mint Strategy fee-free by locking community tokens
+> < _ Each lock allows one fee-free mint
+> < \* 1 MON = 1000 Strategy (no fees deducted)
+
+## < \* Disabled if COMMUNITY_TOKEN is address(0)
+
+>      * @dev Mint ETHERIUM fee-free by locking 100 PepeUSD
+>      * Each lock of 100 PepeUSD allows one fee-free mint
+>      * 1 ETH = 1000 ETHERIUM (no fees deducted)
+>
+> 267,271c260
+> < require(
+> < address(COMMUNITY_TOKEN) != address(0),
+> < "Fee-free minting disabled"
+> < );
+
+## < require(msg.value > 0, "Must send MON");
+
+>         require(msg.value > 0, "Must send ETH");
+>
+> 280c269
+
+## < // Transfer community tokens from user to lock
+
+>         // Transfer 100 PepeUSD from user to lock
+>
+> 282c271
+
+## < COMMUNITY_TOKEN.transferFrom(
+
+>             PEPEUSD.transferFrom(
+>
+> 285c274
+
+## < COMMUNITY_TOKEN_LOCK_AMOUNT
+
+>                 PEPEUSD_LOCK_AMOUNT
+>
+> 287c276
+
+## < "Community token transfer failed"
+
+>             "PepeUSD transfer failed"
+>
+> 291c280
+
+## < communityTokenLocked[msg.sender] += COMMUNITY_TOKEN_LOCK_AMOUNT;
+
+>         pepeUSDLocked[msg.sender] += PEPEUSD_LOCK_AMOUNT;
+>
+> 293c282
+
+## < // Mint without fees, 1 MON = 1000 Strategy during minting period
+
+>         // Mint without fees, 1 ETH = 1000 ETHERIUM during minting period
+>
+> 295c284
+
+## < uint256 monstrToMint = msg.value \* 1000;
+
+>         uint256 etheriumToMint = msg.value * 1000;
+>
+> 300c289
+
+## < totalSupply() + monstrToMint <= maxSupplyEver,
+
+>                 totalSupply() + etheriumToMint <= maxSupplyEver,
+>
+> 307c296
+
+## < \_mint(msg.sender, monstrToMint);
+
+>         _mint(msg.sender, etheriumToMint);
+>
+> 309c298
+
+## < emit CommunityTokenLocked(
+
+>         emit PepeUSDLocked(
+>
+> 311,313c300,302
+> < COMMUNITY_TOKEN_LOCK_AMOUNT,
+> < monstrToMint,
+
+## < deploymentTime + COMMUNITY_TOKEN_UNLOCK_TIME
+
+>             PEPEUSD_LOCK_AMOUNT,
+>             etheriumToMint,
+>             deploymentTime + PEPEUSD_UNLOCK_TIME
+>
+> 316c305
+
+## < emit Minted(msg.sender, msg.value, monstrToMint, 0);
+
+>         emit Minted(msg.sender, msg.value, etheriumToMint, 0);
+>
+> 320c309
+
+## < \* @dev Unlock all community tokens after 1 month from deployment
+
+>      * @dev Unlock all PepeUSD after 1 month from deployment
+>
+> 322c311,313
+
+## < function unlockCommunityToken() external nonReentrant {
+
+>     function unlockPepeUSD() external nonReentrant {
+>         uint256 lockedAmount = pepeUSDLocked[msg.sender];
+>         require(lockedAmount > 0, "No locked PepeUSD");
+>
+> 324,330c315
+> < address(COMMUNITY_TOKEN) != address(0),
+> < "Fee-free minting disabled"
+> < );
+> < uint256 lockedAmount = communityTokenLocked[msg.sender];
+> < require(lockedAmount > 0, "No locked community tokens");
+> < require(
+
+## < block.timestamp >= deploymentTime + COMMUNITY_TOKEN_UNLOCK_TIME,
+
+>             block.timestamp >= deploymentTime + PEPEUSD_UNLOCK_TIME,
+>
+> 341c326
+
+## < communityTokenLocked[msg.sender] = 0;
+
+>         pepeUSDLocked[msg.sender] = 0;
+>
+> 343c328
+
+## < // Return all locked community tokens
+
+>         // Return all locked PepeUSD
+>
+> 345,346c330,331
+> < COMMUNITY_TOKEN.transfer(msg.sender, lockedAmount),
+
+## < "Community token transfer failed"
+
+>             PEPEUSD.transfer(msg.sender, lockedAmount),
+>             "PepeUSD transfer failed"
+>
+> 349c334
+
+## < emit CommunityTokenUnlocked(msg.sender, lockedAmount);
+
+>         emit PepeUSDUnlocked(msg.sender, lockedAmount);
+>
+> 353,354c338,339
+> < \* @dev Redeem Strategy for MON
+
+## < \* Returns proportional share of contract's MON balance (minus 1% fee)
+
+>      * @dev Redeem ETHERIUM for ETH
+>      * Returns proportional share of contract's ETH balance (minus 1% fee)
+>
+> 369c354
+
+## < uint256 netMONSTR = amount - fee;
+
+>         uint256 netEtherium = amount - fee;
+>
+> 371,372c356,357
+> < // Calculate proportional MON to return before state changes
+
+## < // Overflow safety: netMONSTR < 2^112, address(this).balance < 2^96 (MON supply limit)
+
+>         // Calculate proportional ETH to return before state changes
+>         // Overflow safety: netEtherium < 2^112, address(this).balance < 2^96 (ETH supply limit)
+>
+> 374c359
+
+## < uint256 monToReturn = (netMONSTR \* address(this).balance) /
+
+>         uint256 ethToReturn = (netEtherium * address(this).balance) /
+>
+> 383c368
+
+## < \_burn(msg.sender, netMONSTR);
+
+>         _burn(msg.sender, netEtherium);
+>
+> 385,387c370,372
+> < // Transfer proportional MON back to user
+> < (bool success, ) = msg.sender.call{value: monToReturn}("");
+
+## < require(success, "MON transfer failed");
+
+>         // Transfer proportional ETH back to user
+>         (bool success, ) = msg.sender.call{value: ethToReturn}("");
+>         require(success, "ETH transfer failed");
+>
+> 389c374
+
+## < emit Redeemed(msg.sender, amount, monToReturn, fee);
+
+>         emit Redeemed(msg.sender, amount, ethToReturn, fee);
+>
+> 775c760
+
+## < // Try to redeem Strategy for MON and send to public good
+
+>                 // Try to redeem ETHERIUM for ETH and send to public good
+>
+> 781,783c766,768
+> < // Calculate MON value of the Strategy prize
+> < // MON amount = (Strategy amount \* contract MON balance) / total supply
+
+## < uint256 monToSend = (uint256(prize.amount) \*
+
+>                 // Calculate ETH value of the ETHERIUM prize
+>                 // ETH amount = (ETHERIUM amount * contract ETH balance) / total supply
+>                 uint256 ethToSend = (uint256(prize.amount) *
+>
+> 786,787c771,772
+> < // Attempt to send MON to public good
+
+## < (bool success, ) = publicGood.call{value: monToSend}("");
+
+>                 // Attempt to send ETH to public good
+>                 (bool success, ) = publicGood.call{value: ethToSend}("");
+>
+> 790c775
+
+## < // MON transfer successful, now burn the Strategy tokens from lottery pool
+
+>                     // ETH transfer successful, now burn the ETHERIUM tokens from lottery pool
+>
+> 794c779
+
+## < monToSend, // Emit the actual MON amount sent
+
+>                         ethToSend, // Emit the actual ETH amount sent
+>
+> 798c783
+
+## < // MON transfer failed, add unclaimed prize to current winner's prize
+
+>                     // ETH transfer failed, add unclaimed prize to current winner's prize
+>
+> 807c792
+
+## < prize.amount = uint112(feesToDistribute); // Store Strategy amount as prize
+
+>             prize.amount = uint112(feesToDistribute); // Store ETHERIUM amount as prize
+>
+> 1059,1060c1044,1045
+> < // Calculate minimum bid for the Strategy amount being auctioned
+
+## < // MinBid = (MON balance _ feesToDistribute) / (2 _ totalSupply)
+
+>         // Calculate minimum bid for the ETHERIUM amount being auctioned
+>         // MinBid = (ETH balance * feesToDistribute) / (2 * totalSupply)
+>
+> 1074c1059
+
+## < monstrAmount: uint112(feesToDistribute),
+
+>             etheriumAmount: uint112(feesToDistribute),
+>
+> 1090c1075
+
+## < if (currentAuction.monstrAmount > 0) {
+
+>             if (currentAuction.etheriumAmount > 0) {
+>
+> 1092c1077,1081
+
+## < \_atomicUpdate(LOT_POOL, FEES_POOL, currentAuction.monstrAmount);
+
+>                 _atomicUpdate(
+>                     LOT_POOL,
+>                     FEES_POOL,
+>                     currentAuction.etheriumAmount
+>                 );
+>
+> 1108,1110c1097,1099
+> < // Calculate MON value of the Strategy prize
+> < // MON amount = (Strategy amount \* contract MON balance) / total supply
+
+## < uint256 monToSend = (uint256(prize.amount) \*
+
+>             // Calculate ETH value of the ETHERIUM prize
+>             // ETH amount = (ETHERIUM amount * contract ETH balance) / total supply
+>             uint256 ethToSend = (uint256(prize.amount) *
+>
+> 1113c1102
+
+## < (bool success, ) = publicGood.call{value: monToSend}("");
+
+>             (bool success, ) = publicGood.call{value: ethToSend}("");
+>
+> 1117c1106
+
+## < emit PublicGoodsFunded(publicGood, monToSend, prize.winner); // Emit actual MON amount
+
+>                 emit PublicGoodsFunded(publicGood, ethToSend, prize.winner); // Emit actual ETH amount
+>
+> 1120c1109
+
+## < currentAuction.monstrAmount += uint112(prize.amount);
+
+>                 currentAuction.etheriumAmount += uint112(prize.amount);
+>
+> 1124c1113
+
+## < // Convert WMON to MON for the winning bid
+
+>         // Convert WETH to ETH for the winning bid
+>
+> 1126c1115
+
+## < wmon.withdraw(currentAuction.currentBid);
+
+>         WETH.withdraw(currentAuction.currentBid);
+>
+> 1130c1119
+
+## < prize.amount = currentAuction.monstrAmount;
+
+>         prize.amount = currentAuction.etheriumAmount;
+>
+> 1134c1123
+
+## < currentAuction.monstrAmount,
+
+>             currentAuction.etheriumAmount,
+>
+> 1142,1144c1131,1133
+> < _ The bidder must have approved WMON that is at least 10% higher than the current bid
+> < _ Winning bid gets the auctioned Strategy tokens
+
+## < \* Previous bidder gets their WMON refunded immediately
+
+>      * The bidder must have approved WETH that is at least 10% higher than the current bid
+>      * Winning bid gets the auctioned ETHERIUM tokens
+>      * Previous bidder gets their WETH refunded immediately
+>
+> 1151c1140
+
+## < \* Using WMON prevents griefing attacks where malicious bidders could block refunds
+
+>      * Using WETH prevents griefing attacks where malicious bidders could block refunds
+>
+> 1173c1162
+
+## < // Transfer WMON from bidder to contract
+
+>         // Transfer WETH from bidder to contract
+>
+> 1175,1176c1164,1165
+> < wmon.transferFrom(msg.sender, address(this), bidAmount),
+
+## < "WMON transfer failed"
+
+>             WETH.transferFrom(msg.sender, address(this), bidAmount),
+>             "WETH transfer failed"
+>
+> 1189c1178
+
+## < // Refund previous bidder if exists (in WMON)
+
+>         // Refund previous bidder if exists (in WETH)
+>
+> 1192,1193c1181,1182
+> < wmon.transfer(previousBidder, previousBid),
+
+## < "WMON refund failed"
+
+>                 WETH.transfer(previousBidder, previousBid),
+>                 "WETH refund failed"

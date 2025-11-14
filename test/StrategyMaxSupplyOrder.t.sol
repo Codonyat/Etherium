@@ -2,10 +2,55 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Etherium} from "../src/Etherium.sol";
+import {Strategy, IWMON} from "../src/Strategy.sol";
 
-contract EtheriumMaxSupplyOrderTest is Test {
-    Etherium public etherium;
+// Mock WMON for testing
+contract MockWMON {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function deposit() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+
+    function withdraw(uint256 amount) external {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        (bool success,) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        return true;
+    }
+
+    receive() external payable {
+        balanceOf[msg.sender] += msg.value;
+    }
+}
+
+contract StrategyMaxSupplyOrderTest is Test {
+    Strategy public monstr;
+    MockWMON public wmon;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -15,7 +60,8 @@ contract EtheriumMaxSupplyOrderTest is Test {
     event PublicGoodsFunded(address indexed publicGood, uint256 amount, address previousWinner);
 
     function setUp() public {
-        etherium = new Etherium();
+        wmon = new MockWMON();
+        monstr = new Strategy(address(wmon));
 
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -25,98 +71,98 @@ contract EtheriumMaxSupplyOrderTest is Test {
     function testMaxSupplySetBeforeBurns() public {
         // During minting period, create holders
         vm.prank(alice);
-        etherium.mint{value: 50 ether}();
+        monstr.mint{value: 50 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 30 ether}();
+        monstr.mint{value: 30 ether}();
 
         vm.prank(charlie);
-        etherium.mint{value: 20 ether}();
+        monstr.mint{value: 20 ether}();
 
-        // Total supply after minting: 100 ETH * 1000 = 100,000 ETHERIUM
-        uint256 totalSupplyAtEndOfMinting = etherium.totalSupply();
-        assertEq(totalSupplyAtEndOfMinting, 100_000 ether, "Total supply should be 100,000 ETHERIUM");
+        // Total supply after minting: 100 ETH * 1000 = 100,000 MONSTR
+        uint256 totalSupplyAtEndOfMinting = monstr.totalSupply();
+        assertEq(totalSupplyAtEndOfMinting, 100_000 ether, "Total supply should be 100,000 MONSTR");
 
         // Move past minting period
-        vm.warp(etherium.mintingEndTime() + 1);
+        vm.warp(monstr.mintingEndTime() + 1);
 
         // Verify max supply not yet set
-        assertEq(etherium.maxSupplyEver(), 0, "Max supply not yet set");
+        assertEq(monstr.maxSupplyEver(), 0, "Max supply not yet set");
 
         // The first transaction after minting period will set max supply
         // This happens BEFORE any lottery execution or potential burns
-        uint256 totalSupplyBeforeFirstTx = etherium.totalSupply();
+        uint256 totalSupplyBeforeFirstTx = monstr.totalSupply();
         
         // First transaction after minting period - a simple transfer
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
         
         // Max supply should now be set to the total supply BEFORE the transfer
-        uint256 maxSupplyEver = etherium.maxSupplyEver();
+        uint256 maxSupplyEver = monstr.maxSupplyEver();
         assertEq(maxSupplyEver, totalSupplyBeforeFirstTx, "Max supply should be set to initial total");
-        assertEq(maxSupplyEver, 100_000 ether, "Max supply should be 100,000 ETHERIUM");
+        assertEq(maxSupplyEver, 100_000 ether, "Max supply should be 100,000 MONSTR");
         
         // Current supply is actually MORE than max due to transfer fee being added to FEES_POOL
         // After minting period, fees are taken from sender, not minted
-        uint256 currentSupply = etherium.totalSupply();
+        uint256 currentSupply = monstr.totalSupply();
         assertEq(currentSupply, maxSupplyEver, "Supply unchanged - fees just moved between accounts");
         
         // Verify max supply never changes
         vm.prank(bob);
-        etherium.transfer(charlie, 200 ether);
+        monstr.transfer(charlie, 200 ether);
         
-        assertEq(etherium.maxSupplyEver(), maxSupplyEver, "Max supply should never change once set");
+        assertEq(monstr.maxSupplyEver(), maxSupplyEver, "Max supply should never change once set");
     }
 
     function testMaxSupplyWithImmediatePublicGoodsBurn() public {
         // Setup: Create holders and ensure we'll have an unclaimed prize
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         vm.prank(bob);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Day 0: Generate fees
         vm.prank(alice);
-        etherium.transfer(bob, 1000 ether);
+        monstr.transfer(bob, 1000 ether);
 
         // Day 1: Execute lottery to create a winner
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
         // Don't let winner claim - let it sit for 7 days
         // Generate fees each day to keep lottery going
         for (uint256 i = 0; i < 7; i++) {
             vm.prank(bob);
-            etherium.transfer(alice, 100 ether);
+            monstr.transfer(alice, 100 ether);
             
             vm.warp(block.timestamp + 25 hours + 61);
             
             // Skip executing lottery until we're past minting period
-            if (block.timestamp <= etherium.mintingEndTime()) {
-                etherium.executeLottery();
+            if (block.timestamp <= monstr.mintingEndTime()) {
+                monstr.executeLottery();
             }
         }
 
         // Now we're past minting period with an unclaimed prize
-        assertTrue(block.timestamp > etherium.mintingEndTime(), "Should be past minting period");
+        assertTrue(block.timestamp > monstr.mintingEndTime(), "Should be past minting period");
         
         // Generate one more fee
         vm.prank(alice);
-        etherium.transfer(bob, 200 ether);
+        monstr.transfer(bob, 200 ether);
 
-        uint256 totalSupplyBefore = etherium.totalSupply();
+        uint256 totalSupplyBefore = monstr.totalSupply();
         // Max supply might already be set by the transfer above since we're past minting period
-        uint256 maxSupplyBefore = etherium.maxSupplyEver();
+        uint256 maxSupplyBefore = monstr.maxSupplyEver();
 
         // The next lottery execution will:
         // 1. Check and set max supply (happens FIRST now)
         // 2. Try to send unclaimed prize to public goods (might burn tokens)
         vm.warp(block.timestamp + 25 hours + 61);
-        etherium.executeLottery();
+        monstr.executeLottery();
 
-        uint256 maxSupply = etherium.maxSupplyEver();
-        uint256 totalSupplyAfter = etherium.totalSupply();
+        uint256 maxSupply = monstr.maxSupplyEver();
+        uint256 totalSupplyAfter = monstr.totalSupply();
 
         // Max supply should be set and not change
         assertTrue(maxSupply > 0, "Max supply should be set");
@@ -138,24 +184,24 @@ contract EtheriumMaxSupplyOrderTest is Test {
     function testTransferTriggersMaxSupplyBeforeLottery() public {
         // Setup during minting period
         vm.prank(alice);
-        etherium.mint{value: 10 ether}();
+        monstr.mint{value: 10 ether}();
 
         // Move just past minting period
-        vm.warp(etherium.mintingEndTime() + 1);
+        vm.warp(monstr.mintingEndTime() + 1);
 
-        assertEq(etherium.maxSupplyEver(), 0, "Max supply not yet set");
+        assertEq(monstr.maxSupplyEver(), 0, "Max supply not yet set");
 
         // A simple transfer should set max supply before executing lottery
-        uint256 totalSupplyBefore = etherium.totalSupply();
+        uint256 totalSupplyBefore = monstr.totalSupply();
         
         vm.prank(alice);
-        etherium.transfer(bob, 100 ether);
+        monstr.transfer(bob, 100 ether);
 
         // Max supply should now be set
-        uint256 maxSupply = etherium.maxSupplyEver();
+        uint256 maxSupply = monstr.maxSupplyEver();
         assertEq(maxSupply, totalSupplyBefore, "Max supply should be set by transfer");
         
         // And it should equal the total supply before the transfer's fee
-        assertEq(maxSupply, 10000 ether, "Max supply should be 10,000 ETHERIUM");
+        assertEq(maxSupply, 10000 ether, "Max supply should be 10,000 MONSTR");
     }
 }
