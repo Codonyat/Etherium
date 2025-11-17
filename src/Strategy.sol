@@ -1128,6 +1128,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
      * Winning bid gets the auctioned MONSTR tokens
      * Previous bidder gets their WMON refunded immediately
      *
+     * Bidder can send MON as well which then gets wrapped in into WMON.
+     *
      * We enforce a 10% minimum increment to make auctions more accessible to non-bot participants.
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
@@ -1136,7 +1138,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
      * Using WMON prevents griefing attacks where malicious bidders could block refunds
      * by reverting in their receive() function.
      */
-    function bid(uint256 bidAmount) external nonReentrant {
+    function bid(uint256 bidAmount) external payable nonReentrant {
         require(currentAuction.auctionDay != 0, "No active auction");
 
         // Check and set max supply (for consistency)
@@ -1152,13 +1154,21 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
-        require(bidAmount >= minBid, "Bid too low");
+        // Handle native MON bidding
+        if (msg.value > 0) {
+            // Override bidAmount with msg.value for native MON
+            bidAmount = msg.value;
+            // Wrap native MON to WMON
+            wmon.deposit{value: msg.value}();
+        } else {
+            // Transfer the bid to the contract
+            require(
+                wmon.transferFrom(msg.sender, address(this), bidAmount),
+                "WMON transfer failed"
+            );
+        }
 
-        // Transfer WMON from bidder to contract
-        require(
-            wmon.transferFrom(msg.sender, address(this), bidAmount),
-            "WMON transfer failed"
-        );
+        require(bidAmount >= minBid, "Bid too low");
 
         // Store previous bidder info
         address previousBidder = currentAuction.currentBidder;

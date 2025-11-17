@@ -447,6 +447,357 @@ contract StrategyAuctionTest is WMONTestBase {
             "Min bid should be half of redemption value"
         );
     }
+
+    // ============ Native MON Bidding Tests ============
+
+    function testBidWithNativeMON() public {
+        // Setup: Generate fees and start auction
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice bids with native MON
+        uint256 aliceBalanceBefore = alice.balance;
+        vm.prank(alice);
+        monstr.bid{value: minBid}(0); // Pass 0 as bidAmount when using msg.value
+
+        // Verify Alice's MON balance decreased
+        assertEq(
+            alice.balance,
+            aliceBalanceBefore - minBid,
+            "Alice should have spent MON"
+        );
+
+        // Verify contract received WMON (not native MON)
+        assertEq(
+            wmon.balanceOf(address(monstr)),
+            minBid,
+            "Contract should hold WMON"
+        );
+
+        // Verify Alice is the current bidder
+        (address currentBidder, uint96 currentBid, , , ) = monstr
+            .currentAuction();
+        assertEq(currentBidder, alice, "Alice should be current bidder");
+        assertEq(currentBid, minBid, "Bid amount should match minBid");
+    }
+
+    function testBidWithNativeMONOverridesBidAmount() public {
+        // Test that msg.value takes precedence over bidAmount parameter
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice sends native MON but passes different bidAmount parameter
+        vm.prank(alice);
+        monstr.bid{value: minBid}(999999 ether); // This gets ignored
+
+        // Verify the actual bid is msg.value, not the parameter
+        (, uint96 currentBid, , , ) = monstr.currentAuction();
+        assertEq(currentBid, minBid, "Bid should be msg.value, not parameter");
+    }
+
+    function testNativeMONBidRefundsInWMON() public {
+        // Test that previous bidders get WMON refund even if current bidder uses native MON
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice bids with WMON - get enough WMON for the bid
+        getWMONAndApprove(alice, address(monstr), minBid);
+        vm.prank(alice);
+        monstr.bid(minBid);
+
+        // Bob outbids with native MON
+        uint256 newBid = (minBid * 110) / 100;
+        vm.prank(bob);
+        monstr.bid{value: newBid}(0);
+
+        // Verify Alice got refunded in WMON (not native MON)
+        // She should get back exactly what she bid
+        assertEq(
+            wmon.balanceOf(alice),
+            minBid,
+            "Alice should receive WMON refund equal to her bid"
+        );
+
+        // Verify Bob is current bidder
+        (address currentBidder, , , , ) = monstr.currentAuction();
+        assertEq(currentBidder, bob, "Bob should be current bidder");
+    }
+
+    function testMixedNativeMONAndWMONBids() public {
+        // Test that native MON and WMON bids can be mixed in same auction
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice bids with native MON
+        vm.prank(alice);
+        monstr.bid{value: minBid}(0);
+
+        // Bob outbids with WMON
+        uint256 bid2 = (minBid * 110) / 100;
+        getWMONAndApprove(bob, address(monstr), bid2);
+        vm.prank(bob);
+        monstr.bid(bid2);
+
+        // Charlie outbids with native MON
+        uint256 bid3 = (bid2 * 110) / 100;
+        vm.prank(charlie);
+        monstr.bid{value: bid3}(0);
+
+        // David outbids with WMON
+        uint256 bid4 = (bid3 * 110) / 100;
+        getWMONAndApprove(david, address(monstr), bid4);
+        vm.prank(david);
+        monstr.bid(bid4);
+
+        // Verify all previous bidders got WMON refunds
+        assertEq(
+            wmon.balanceOf(alice),
+            minBid,
+            "Alice should have WMON refund"
+        );
+        assertEq(wmon.balanceOf(bob), bid2, "Bob should have WMON refund");
+        assertEq(
+            wmon.balanceOf(charlie),
+            bid3,
+            "Charlie should have WMON refund"
+        );
+
+        // Verify David is the winner
+        (address currentBidder, , , , ) = monstr.currentAuction();
+        assertEq(currentBidder, david, "David should be current bidder");
+    }
+
+    function testNativeMONBidTooLow() public {
+        // Test that bidding with native MON below minimum reverts
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice tries to bid with native MON below minimum
+        vm.prank(alice);
+        vm.expectRevert("Bid too low");
+        monstr.bid{value: minBid - 1}(0);
+
+        // Verify no bid was placed
+        (address currentBidder, , , , ) = monstr.currentAuction();
+        assertEq(currentBidder, address(0), "Should have no bidder");
+    }
+
+    function testNativeMONBidRevertRollback() public {
+        // Test that if native MON bid fails, the WMON wrapping is rolled back
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        uint256 aliceBalanceBefore = alice.balance;
+        uint256 wmonBalanceBefore = wmon.balanceOf(address(monstr));
+
+        // Alice tries to bid too low with native MON
+        vm.prank(alice);
+        vm.expectRevert("Bid too low");
+        monstr.bid{value: minBid - 1}(0);
+
+        // Verify Alice's MON was refunded (transaction reverted)
+        assertEq(
+            alice.balance,
+            aliceBalanceBefore,
+            "Alice should have same MON balance"
+        );
+
+        // Verify contract didn't receive any WMON
+        assertEq(
+            wmon.balanceOf(address(monstr)),
+            wmonBalanceBefore,
+            "Contract should have same WMON balance"
+        );
+    }
+
+    function testAuctionFinalizationWithNativeMONWinner() public {
+        // Test that auction finalization works correctly when winner used native MON
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
+
+        // Alice bids with native MON
+        vm.prank(alice);
+        monstr.bid{value: minBid}(0);
+
+        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
+        assertEq(
+            contractWMONBefore,
+            minBid,
+            "Contract should hold Alice's WMON bid"
+        );
+
+        // Generate fees for next day
+        vm.prank(bob);
+        monstr.transfer(alice, 0.5 ether);
+
+        // Finalize auction by triggering next day's lottery
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        // Verify WMON was withdrawn to MON
+        assertEq(
+            wmon.balanceOf(address(monstr)),
+            0,
+            "Contract should have no WMON after finalization"
+        );
+
+        // Verify Alice won the auction and has claimable prize (at least the auction amount)
+        vm.prank(alice);
+        uint256 claimable = monstr.getMyClaimableAmount();
+        assertGe(
+            claimable,
+            auctionAmount,
+            "Alice should have at least the auction prize claimable"
+        );
+
+        // Verify Alice can actually claim her prize
+        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        vm.prank(alice);
+        monstr.claim();
+        uint256 aliceBalanceAfter = monstr.balanceOf(alice);
+
+        assertEq(
+            aliceBalanceAfter - aliceBalanceBefore,
+            claimable,
+            "Alice should receive her claimable amount"
+        );
+    }
+
+    function testNativeMONBidIncrementRequirement() public {
+        // Test that 10% increment rule applies to native MON bids
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        // Alice bids with native MON
+        vm.prank(alice);
+        monstr.bid{value: minBid}(0);
+
+        // Bob tries to bid with only 9% increase using native MON
+        uint256 lowBid = (minBid * 109) / 100;
+        vm.prank(bob);
+        vm.expectRevert("Bid too low");
+        monstr.bid{value: lowBid}(0);
+
+        // Bob bids with exactly 10% increase using native MON
+        uint256 validBid = (minBid * 110) / 100;
+        vm.prank(bob);
+        monstr.bid{value: validBid}(0);
+
+        // Verify Bob is now the current bidder
+        (address currentBidder, , , , ) = monstr.currentAuction();
+        assertEq(currentBidder, bob, "Bob should be current bidder");
+    }
+
+    function testNativeMONWrappingCorrectness() public {
+        // Test that native MON is correctly wrapped to WMON
+        vm.prank(alice);
+        monstr.mint{value: 10 ether}();
+
+        vm.warp(block.timestamp + 8 days + 1 hours);
+        vm.prank(alice);
+        monstr.transfer(bob, 1 ether);
+
+        vm.warp(block.timestamp + 25 hours + 1 minutes);
+        monstr.executeLottery();
+
+        (, , uint96 minBid, , ) = monstr.currentAuction();
+
+        uint256 contractNativeBefore = address(monstr).balance;
+        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
+
+        // Alice bids with native MON
+        vm.prank(alice);
+        monstr.bid{value: minBid}(0);
+
+        // Contract's native MON should not increase (it gets wrapped)
+        // Actually, it will increase because wmon.deposit returns MON to contract via receive()
+        // But WMON balance should definitely increase
+        assertEq(
+            wmon.balanceOf(address(monstr)),
+            contractWMONBefore + minBid,
+            "Contract should have received WMON"
+        );
+
+        // Verify the WMON amount matches the bid amount exactly
+        (, uint96 currentBid, , , ) = monstr.currentAuction();
+        assertEq(
+            wmon.balanceOf(address(monstr)),
+            currentBid,
+            "WMON balance should match bid amount"
+        );
+    }
 }
 
 // Test specifically for DoS prevention
