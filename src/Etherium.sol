@@ -1132,6 +1132,8 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * Winning bid gets the auctioned ETHERIUM tokens
      * Previous bidder gets their WETH refunded immediately
      *
+     * Bidder can send ETH as well which then gets wrapped in into WETH.
+     *
      * We enforce a 10% minimum increment to make auctions more accessible to non-bot participants.
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
@@ -1140,7 +1142,7 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
      * Using WETH prevents griefing attacks where malicious bidders could block refunds
      * by reverting in their receive() function.
      */
-    function bid(uint256 bidAmount) external nonReentrant {
+    function bid(uint256 bidAmount) external payable nonReentrant {
         require(currentAuction.auctionDay != 0, "No active auction");
 
         // Check and set max supply (for consistency)
@@ -1157,13 +1159,21 @@ contract Etherium is ERC20, ReentrancyGuardTransient {
             ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
-        require(bidAmount >= minBid, "Bid too low");
+        // Handle native ETH bidding
+        if (msg.value > 0) {
+            // Override bidAmount with msg.value for native ETH
+            bidAmount = msg.value;
+            // Wrap native ETH to WETH
+            WETH.deposit{value: msg.value}();
+        } else {
+            // Transfer the bid to the contract
+            require(
+                WETH.transferFrom(msg.sender, address(this), bidAmount),
+                "WETH transfer failed"
+            );
+        }
 
-        // Transfer WETH from bidder to contract
-        require(
-            WETH.transferFrom(msg.sender, address(this), bidAmount),
-            "WETH transfer failed"
-        );
+        require(bidAmount >= minBid, "Bid too low");
 
         // Store previous bidder info
         address previousBidder = currentAuction.currentBidder;
