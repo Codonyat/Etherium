@@ -117,6 +117,12 @@ abstract contract StrategyTestBase is Test {
         vm.warp(block.timestamp + 25 hours + 61);
     }
 
+    // Helper function to skip past the minting period
+    function skipPastMintingPeriod() internal {
+        uint256 mintingPeriod = monstr.MINTING_PERIOD();
+        vm.warp(block.timestamp + mintingPeriod + 1 days);
+    }
+
     // Helper function to set up basic holders
     function setupBasicHolders() internal {
         vm.prank(alice);

@@ -44,7 +44,7 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         monstr.mint{value: 100 ether}();
 
         // Skip past minting period to enable alternating lottery/auction
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate some fees through transfers
         // Transfer fee is 1%, so 10 * 0.01 = 0.1 MONSTR fee
@@ -220,7 +220,7 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         monstr.mint{value: 100 ether}();
 
         // Skip past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees
         vm.prank(alice);
@@ -382,10 +382,10 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
     /**
      * @dev Test that verifies no auctions occur during the minting period
-     * All fees should go to lottery during the first 7 days
+     * All fees should go to lottery during the minting period
      */
     function testNoAuctionsDuringMintingPeriod() public {
-        // During minting period (first 7 days)
+        // During minting period
         // All fees should go to lottery, not auction
 
         // Day 0: Setup holders
@@ -483,12 +483,12 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             "Should have a lottery winner during minting period"
         );
         assertGt(lotteryPrize, 0, "Lottery prize should be greater than 0");
-        // Verify the prize amount (fees are split 50/50 between lottery and randomness)
-        // Total fees: 2.58 MONSTR, lottery gets 50% = 1.29 MONSTR
+        // Verify the prize amount - during minting period, all fees go to lottery (no auction)
+        // Total fees: 2.58 MONSTR, lottery gets 100% = 2.58 MONSTR
         assertEq(
             lotteryPrize,
-            1.29 ether,
-            "Lottery prize should be 50% of collected fees"
+            2.58 ether,
+            "Lottery prize should be all collected fees during minting period"
         );
 
         // Test multiple days during minting period
@@ -656,13 +656,13 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             lotteryPrizeAmount,
             "Should claim exact lottery prize amount"
         );
-        // During minting period: Fees are split 50/50 between lottery and randomness
+        // During minting period: All fees go to lottery (no auction)
         // Total fees: 2.6 MONSTR (1 + 1 + 0.5 mint fees + 0.1 transfer fee)
-        // Lottery gets: 2.6 * 0.5 = 1.3 MONSTR
+        // Lottery gets: 2.6 * 1.0 = 2.6 MONSTR (100% during minting period)
         assertEq(
             actualClaimed,
-            1.3 ether,
-            "Should claim exactly 1.3 MONSTR in fees (50% of total)"
+            2.6 ether,
+            "Should claim exactly 2.6 MONSTR in fees (100% during minting period)"
         );
         console.log("Actual claimed amount:", actualClaimed);
 

@@ -189,7 +189,7 @@ contract StrategyAtomicityTest is Test {
         );
 
         // Move past minting period to enable redemption
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
 
         // Trigger max supply setting
         uint256 redeemAmount = 0.1 ether;

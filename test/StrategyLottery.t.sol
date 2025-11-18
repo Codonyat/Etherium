@@ -28,7 +28,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         );
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees via transfer on day 8
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
@@ -83,7 +83,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 8
         vm.prank(alice);
@@ -138,7 +138,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         uint256 charlieWins;
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         for (uint256 i = 0; i < rounds; i++) {
             // Generate some fees via transfer
@@ -187,7 +187,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 8
         vm.prank(alice);
@@ -223,7 +223,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees
         vm.prank(alice);
@@ -268,7 +268,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         monstr.mint{value: 3 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Complex transfers
         vm.prank(alice);
@@ -298,7 +298,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // First lottery cycle
         vm.prank(alice);
@@ -358,16 +358,16 @@ contract StrategyLotteryTest is StrategyTestBase {
         (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
-        // Day 0 fees: 0.151 tokens total, but split 50/50 between lottery and randomness pool
-        // Lottery gets 0.0755 tokens (0.151 * 0.9 / 2 lottery + 0.151 * 0.1 / 2 randomness)
-        assertEq(amount, 0.0755 ether, "Day 0 lottery prize should be 0.0755 tokens");
+        // Day 0 fees: 0.151 tokens total
+        // During minting period, ALL fees go to lottery (no auction split)
+        assertEq(amount, 0.151 ether, "Day 0 lottery prize should be 0.151 tokens");
     }
 
     function testDelayedLotteryTrigger() public {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 8
         vm.prank(alice);
@@ -441,7 +441,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate significant fees on day 8
         vm.prank(alice);
@@ -485,7 +485,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 9 (odd day = lottery day)
         vm.warp(block.timestamp + 25 hours);
@@ -571,7 +571,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         }
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Day 9: Generate fees via transfers
         vm.warp(block.timestamp + 25 hours);

@@ -42,7 +42,8 @@ contract StrategyAuctionTest is WMONTestBase {
         monstr.mint{value: 10 ether}();
 
         // Fast forward past minting period
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
 
         // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
@@ -92,7 +93,8 @@ contract StrategyAuctionTest is WMONTestBase {
         monstr.mint{value: 10 ether}();
 
         // Fast forward past minting period
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
 
         // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
@@ -145,7 +147,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -180,7 +183,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -276,7 +280,7 @@ contract StrategyAuctionTest is WMONTestBase {
         );
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod(monstr);
 
         // Generate specific amount of fees for auction
         vm.prank(alice);
@@ -334,7 +338,7 @@ contract StrategyAuctionTest is WMONTestBase {
         monstr.mint{value: 100 ether}(); // 99 MONSTR
 
         // Burn most tokens to simulate deflation
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod(monstr);
         vm.prank(alice);
         monstr.redeem(90 ether); // Burns 89.1 MONSTR, returns ~89.1 MON
 
@@ -408,7 +412,7 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 3 ether}(); // 2.97 MONSTR to alice, 0.03 to fees
 
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod(monstr);
 
         // Generate an odd fee amount: 0.007 MONSTR
         // After split: 0.0035 MONSTR for auction
@@ -455,7 +459,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -495,7 +500,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -518,7 +524,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -555,7 +562,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -608,7 +616,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -632,7 +641,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -669,7 +679,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -731,7 +742,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -765,7 +777,8 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether);
 
@@ -832,7 +845,8 @@ contract StrategyAuctionSecurityTest is WMONTestBase {
         vm.prank(alice);
         monstr.mint{value: 10 ether}();
 
-        vm.warp(block.timestamp + 8 days + 1 hours);
+        skipPastMintingPeriod(monstr);
+        vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         monstr.transfer(address(0x99), 1 ether);
 

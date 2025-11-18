@@ -286,7 +286,7 @@ contract StrategyDonationTest is Test {
         monstr.mint{value: 10 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
 
         // Alice redeems to trigger max supply setting
         vm.prank(alice);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IWMON} from "../.././src/Strategy.sol";
+import {IWMON, Strategy} from "../.././src/Strategy.sol";
 
 contract MockWMON {
     mapping(address => uint256) public balanceOf;
@@ -86,5 +86,11 @@ abstract contract WMONTestBase is Test {
         wmon.deposit{value: amount}();
         wmon.approve(spender, amount);
         vm.stopPrank();
+    }
+
+    // Helper function to skip past the minting period
+    function skipPastMintingPeriod(Strategy strategy) internal {
+        uint256 mintingPeriod = strategy.MINTING_PERIOD();
+        vm.warp(block.timestamp + mintingPeriod + 1 days);
     }
 }

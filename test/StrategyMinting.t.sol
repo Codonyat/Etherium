@@ -49,8 +49,8 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.mint{value: 1 ether}();
         assertGt(monstr.balanceOf(alice), 0);
 
-        // Fast forward past minting period (7 days * 25 hours)
-        vm.warp(block.timestamp + 7 * 25 hours + 1);
+        // Fast forward past minting period
+        skipPastMintingPeriod();
 
         // After minting period - should fail without capacity
         vm.expectRevert("Max supply reached");
@@ -73,7 +73,7 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.mint{value: 10 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Try to mint without capacity
         vm.expectRevert("Max supply reached");
@@ -318,7 +318,7 @@ contract StrategyMintingTest is StrategyTestBase {
         monstr.mint{value: 1 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Do a small transaction to trigger max supply setting
         vm.prank(alice);

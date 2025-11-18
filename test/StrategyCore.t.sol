@@ -95,7 +95,7 @@ contract StrategyCoreTest is StrategyTestBase {
         monstr.mint{value: 10 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees for first auction
         vm.prank(alice);
@@ -230,7 +230,7 @@ contract StrategyCoreTest is StrategyTestBase {
         monstr.mint{value: 10 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees and create first auction
         vm.prank(alice);
@@ -355,7 +355,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees
         uint256 aliceBalanceBefore = monstr.balanceOf(alice);
@@ -400,7 +400,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Day 9: Generate fees (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
@@ -455,7 +455,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Day 9: Generate fees
         vm.warp(block.timestamp + 25 hours);
@@ -496,7 +496,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate significant fees
         vm.prank(alice);
@@ -555,7 +555,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 9 for lottery
         vm.warp(block.timestamp + 25 hours);
@@ -587,7 +587,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees for auction
         vm.prank(alice);
@@ -647,7 +647,7 @@ contract StrategyCoreTest is StrategyTestBase {
         setupBasicHolders();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        skipPastMintingPeriod();
 
         // Generate fees on day 9 (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);

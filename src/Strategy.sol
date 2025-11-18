@@ -31,8 +31,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     uint256 public constant DECIMALS = 18;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
-    uint256 public constant MINTING_PERIOD = 1 days;
-    uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e12;
+    uint256 public constant MINTING_PERIOD = 3 days;
+    uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e18;
     uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic addresses for fee management

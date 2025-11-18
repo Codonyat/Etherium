@@ -158,7 +158,7 @@ contract StrategySecurityTest is Test {
         monstr.mint{value: 100 ether}();
 
         // Fast forward past minting period
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
 
         // First burn some tokens to create capacity (this also sets max supply)
         vm.prank(alice);
@@ -212,7 +212,7 @@ contract StrategySecurityTest is Test {
         monstr.mint{value: 5 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
 
         // Generate fees on day 8
         vm.prank(alice);
@@ -271,7 +271,7 @@ contract StrategySecurityTest is Test {
         monstr.mint{value: 5 ether}();
 
         // Generate some transfer fees on day 8
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
         vm.prank(alice);
         monstr.transfer(bob, 1 ether); // 0.01 MONSTR fee
 
@@ -359,7 +359,7 @@ contract StrategySecurityTest is Test {
         }
 
         // Move past minting period to ensure fees go to pool
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
 
         // Do random transfers to generate fees
         for (uint256 i = 0; i < 50; i++) {
