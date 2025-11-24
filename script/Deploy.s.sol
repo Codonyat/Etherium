@@ -6,10 +6,10 @@ import {Strategy} from "../src/Strategy.sol";
 
 /** @dev deployment:
     With Ledger:
-    forge script script/Deploy.s.sol --rpc-url <RPC_URL> --broadcast --ledger --hd-paths $HD_PATH
+    forge script script/Deploy.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --ledger --hd-paths $HD_PATH
 
     With Private Key:
-    forge script script/Deploy.s.sol --rpc-url <RPC_URL> --broadcast --private-key $PRIVATE_KEY
+    forge script script/Deploy.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --private-key $PRIVATE_KEY
 */
 contract DeployScript is Script {
     address wmonAddress;
