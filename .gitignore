@@ -35,3 +35,6 @@ lcov.info
 
 # Gas reports
 .gas-snapshot
+
+# Broadcast files
+broadcast/

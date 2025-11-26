@@ -16,7 +16,7 @@ optimizer_runs = 100000 # 2^32-1
 mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
 
 # Monad Mainnet (Chain ID: 143)
-# monad = "${MONAD_RPC_URL}" # RPC URL TBA, set via env variable when available
+monad = "https://monad-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}" # RPC URL TBA, set via env variable when available
 
 # Monad Testnet (Chain ID: 10143)
 monad_testnet = "https://testnet-rpc.monad.xyz" # QuickNode, 25 rps, archives supported
