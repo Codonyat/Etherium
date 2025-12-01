@@ -12,7 +12,7 @@ import {WMEGAAddresses} from "./WMEGAAddresses.sol";
 
     With Private Key:
     forge script script/Deploy.s.sol --rpc-url mega_testnet_alchemy --broadcast --private-key $PRIVATE_KEY \
-    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei
+    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei --gas-limit 6000000
 */
 contract DeployScript is Script {
     function run() public {
