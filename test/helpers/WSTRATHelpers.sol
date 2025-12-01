@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IWMEGA, Strategy} from "../.././src/Strategy.sol";
+import {Strategy} from "../.././src/Strategy.sol";
 
-contract MockWMEGA {
+// MockMEGA is a simple ERC20 token for testing
+// It has a mint function that anyone can call to get tokens
+contract MockMEGA {
+    string public name = "Mock MEGA";
+    string public symbol = "MEGA";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -14,17 +21,18 @@ contract MockWMEGA {
         uint256 value
     );
 
-    function deposit() external payable {
-        balanceOf[msg.sender] += msg.value;
-        emit Transfer(address(0), msg.sender, msg.value);
+    // Mint tokens to the caller (for testing)
+    function mint(uint256 amount) external {
+        balanceOf[msg.sender] += amount;
+        totalSupply += amount;
+        emit Transfer(address(0), msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MEGA transfer failed");
-        emit Transfer(msg.sender, address(0), amount);
+    // Mint tokens to a specific address (for testing)
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+        emit Transfer(address(0), to, amount);
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -60,31 +68,35 @@ contract MockWMEGA {
         return true;
     }
 
+    // Accept ETH and convert to MEGA tokens (simulates buying MEGA)
+    // This is useful for tests that use vm.deal to give users ETH
     receive() external payable {
         balanceOf[msg.sender] += msg.value;
+        totalSupply += msg.value;
         emit Transfer(address(0), msg.sender, msg.value);
     }
 }
 
 import {Test} from "forge-std/Test.sol";
 
-abstract contract WMEGATestBase is Test {
-    IWMEGA public wmega;
+abstract contract MEGATestBase is Test {
+    MockMEGA public mega;
 
-    function setupWMEGA() internal {
-        // Deploy mock WMEGA for tests that don't inherit from StrategyTestBase
-        MockWMEGA mockWmega = new MockWMEGA();
-        wmega = IWMEGA(address(mockWmega));
+    function setupMEGA() internal {
+        // Deploy mock MEGA for tests that don't inherit from StrategyTestBase
+        mega = new MockMEGA();
     }
 
-    function getWMEGAAndApprove(
+    function getMEGAAndApprove(
         address user,
         address spender,
         uint256 amount
     ) internal {
         vm.startPrank(user);
-        wmega.deposit{value: amount}();
-        wmega.approve(spender, amount);
+        // Send ETH to MockMEGA to get tokens (uses receive function)
+        (bool success, ) = address(mega).call{value: amount}("");
+        require(success, "Failed to get MEGA");
+        mega.approve(spender, amount);
         vm.stopPrank();
     }
 
@@ -92,5 +104,28 @@ abstract contract WMEGATestBase is Test {
     function skipPastMintingPeriod(Strategy strategy) internal {
         uint256 mintingPeriod = strategy.MINTING_PERIOD();
         vm.warp(block.timestamp + mintingPeriod + 1 days);
+    }
+}
+
+// Keep old names for backwards compatibility during migration
+// These will be removed after all tests are updated
+contract MockWMEGA is MockMEGA {}
+
+abstract contract WMEGATestBase is MEGATestBase {
+    function setupWMEGA() internal {
+        setupMEGA();
+    }
+
+    function getWMEGAAndApprove(
+        address user,
+        address spender,
+        uint256 amount
+    ) internal {
+        getMEGAAndApprove(user, spender, amount);
+    }
+
+    // Expose mega as wmega for backwards compatibility
+    function wmega() internal view returns (MockMEGA) {
+        return mega;
     }
 }

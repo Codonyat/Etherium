@@ -2,12 +2,11 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../.././src/Strategy.sol";
-import {WMEGAAddresses} from "../.././script/WMEGAAddresses.sol";
+import {Strategy} from "../.././src/Strategy.sol";
 
 abstract contract StrategyTestBase is Test {
     Strategy public giga;
-    IWMEGA public wmega;
+    MockMEGA public mega;
     MockERC20 public communityToken;
 
     // Common test addresses
@@ -55,30 +54,28 @@ abstract contract StrategyTestBase is Test {
     );
 
     function setUp() public virtual {
-        // Determine which WMEGA to use based on chain ID
-        address wmegaAddress = WMEGAAddresses.getWMEGAAddress();
-
-        if (wmegaAddress == address(0)) {
-            // No real WMEGA available - deploy mock for local testing
-            MockWMEGA mockWmega = new MockWMEGA();
-            wmega = IWMEGA(address(mockWmega));
-        } else {
-            // Use real WMEGA from the network
-            wmega = IWMEGA(wmegaAddress);
-        }
+        // Deploy mock MEGA token
+        mega = new MockMEGA();
 
         // Deploy mock community token for tests that need it
         communityToken = new MockERC20();
 
-        // Deploy Strategy with appropriate WMEGA
-        giga = new Strategy(address(wmega));
+        // Deploy Strategy with MEGA token address
+        giga = new Strategy(address(mega));
 
-        // Fund test accounts
+        // Fund test accounts with ETH (for gas) and MEGA tokens
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
         vm.deal(charlie, 100 ether);
         vm.deal(david, 100 ether);
         vm.deal(eve, 100 ether);
+
+        // Give each test account MEGA tokens
+        mega.mint(alice, 100 ether);
+        mega.mint(bob, 100 ether);
+        mega.mint(charlie, 100 ether);
+        mega.mint(david, 100 ether);
+        mega.mint(eve, 100 ether);
     }
 
     // Note: Community token is now hardcoded in the contract
@@ -100,23 +97,91 @@ abstract contract StrategyTestBase is Test {
         vm.warp(block.timestamp + mintingPeriod + 1 days);
     }
 
+    // Helper to approve MEGA and mint GIGA
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
+    }
+
     // Helper function to set up basic holders
     function setupBasicHolders() internal {
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 5 ether);
+        mintGiga(charlie, 2 ether);
+    }
+}
 
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+// MockMEGA is a simple ERC20 token for testing
+contract MockMEGA {
+    string public name = "Mock MEGA";
+    string public symbol = "MEGA";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
 
-        vm.prank(charlie);
-        giga.mint{value: 2 ether}();
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(
+        address indexed owner,
+        address indexed spender,
+        uint256 value
+    );
+
+    // Mint tokens to a specific address (for testing)
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+        emit Transfer(address(0), to, amount);
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        emit Transfer(from, to, amount);
+        return true;
     }
 }
 
 // Common mock contracts used across tests
 contract MockContract {
-    function mintStrategy(Strategy _giga) external {
-        _giga.mint{value: 1 ether}();
+    MockMEGA public mega;
+
+    constructor(MockMEGA _mega) {
+        mega = _mega;
+    }
+
+    function mintStrategy(Strategy _giga, uint256 amount) external {
+        mega.approve(address(_giga), amount);
+        _giga.mint(amount);
     }
 
     function transferStrategy(
@@ -155,24 +220,29 @@ contract MockRejectNative {
 // Attack contract for reentrancy tests
 contract ReentrancyAttacker {
     Strategy public target;
+    MockMEGA public mega;
     uint256 public attackCount;
     bool public attacking;
 
-    constructor(Strategy _target) {
+    constructor(Strategy _target, MockMEGA _mega) {
         target = _target;
+        mega = _mega;
     }
 
-    function attack() external payable {
+    function attack(uint256 amount) external {
         attacking = true;
-        target.mint{value: msg.value}();
+        mega.approve(address(target), amount);
+        target.mint(amount);
     }
 
     receive() external payable {
         if (attacking && attackCount < 1) {
             attackCount++;
             // Try to mint again during the callback
-            if (address(this).balance >= 1 ether) {
-                target.mint{value: 1 ether}();
+            uint256 balance = mega.balanceOf(address(this));
+            if (balance >= 1 ether) {
+                mega.approve(address(target), 1 ether);
+                target.mint(1 ether);
             }
         }
     }
@@ -220,68 +290,5 @@ contract MockERC20 {
     }
 }
 
-// Mock WMEGA for local testing
-// This is only used when running tests without a fork (local testing)
-// When testing on MegaETH forks, the real WMEGA contract is used instead
-contract MockWMEGA {
-    mapping(address => uint256) public balanceOf;
-    mapping(address => mapping(address => uint256)) public allowance;
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(
-        address indexed owner,
-        address indexed spender,
-        uint256 value
-    );
-
-    function deposit() external payable {
-        balanceOf[msg.sender] += msg.value;
-        emit Transfer(address(0), msg.sender, msg.value);
-    }
-
-    function withdraw(uint256 amount) external {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MEGA transfer failed");
-        emit Transfer(msg.sender, address(0), amount);
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        allowance[msg.sender][spender] = amount;
-        emit Approval(msg.sender, spender, amount);
-        return true;
-    }
-
-    function transfer(address to, uint256 amount) external returns (bool) {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        balanceOf[to] += amount;
-        emit Transfer(msg.sender, to, amount);
-        return true;
-    }
-
-    function transferFrom(
-        address from,
-        address to,
-        uint256 amount
-    ) external returns (bool) {
-        require(balanceOf[from] >= amount, "Insufficient balance");
-        require(
-            allowance[from][msg.sender] >= amount,
-            "Insufficient allowance"
-        );
-
-        balanceOf[from] -= amount;
-        balanceOf[to] += amount;
-        allowance[from][msg.sender] -= amount;
-
-        emit Transfer(from, to, amount);
-        return true;
-    }
-
-    receive() external payable {
-        balanceOf[msg.sender] += msg.value;
-        emit Transfer(address(0), msg.sender, msg.value);
-    }
-}
+// Keep MockWMEGA as alias for backwards compatibility
+contract MockWMEGA is MockMEGA {}

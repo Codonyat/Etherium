@@ -6,9 +6,9 @@ pragma solidity ^0.8.20;
 library WMEGAAddresses {
     // MegaETH WMEGA addresses
     address public constant WMEGA_MAINNET =
-        0x4eB2Bd7beE16F38B1F4a0A5796Fffd028b6040e9;
+        0x4200000000000000000000000000000000000006;
     address public constant WMEGA_TESTNET =
-        0x4eB2Bd7beE16F38B1F4a0A5796Fffd028b6040e9;
+        0x4200000000000000000000000000000000000006;
 
     /// @dev Returns the appropriate WMEGA address for the current chain
     /// @return The WMEGA address, or address(0) for unsupported chains (local testing)

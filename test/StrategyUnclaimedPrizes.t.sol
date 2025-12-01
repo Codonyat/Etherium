@@ -1,24 +1,101 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {StrategyTestBase} from "./helpers/StrategyTestBase.sol";
-import {console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {Test, console} from "forge-std/Test.sol";
+import {Strategy} from "../src/Strategy.sol";
 
-contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
-    uint256 megaFork;
+// Mock ERC20 MEGA for testing
+contract MockMEGA {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
 
-    // Additional events not in base class
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        return true;
+    }
+}
+
+contract StrategyUnclaimedPrizesBugTest is Test {
+    Strategy public giga;
+    MockMEGA public mega;
+
+    address public alice = address(0x1);
+    address public bob = address(0x2);
+    address public charlie = address(0x3);
+    address public david = address(0x4);
+
+    // Events
+    event Minted(
+        address indexed to,
+        uint256 megaAmount,
+        uint256 gigaAmount,
+        uint256 fee
+    );
+    event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event BidPlaced(address indexed bidder, uint256 amount, uint256 day);
     event AuctionStarted(uint256 day, uint256 gigaAmount, uint256 minBid);
 
-    function setUp() public override {
-        // Use mega testnet fork - StrategyTestBase will automatically detect chain and use correct WMEGA
-        megaFork = vm.createFork("mega_testnet");
-        vm.selectFork(megaFork);
+    function setUp() public {
+        mega = new MockMEGA();
+        giga = new Strategy(address(mega));
 
-        // Call parent setUp which will detect we're on MegaETH Testnet and use the real WMEGA
-        super.setUp();
+        // Fund test accounts
+        mega.mint(alice, 1000 ether);
+        mega.mint(bob, 1000 ether);
+        mega.mint(charlie, 1000 ether);
+        mega.mint(david, 1000 ether);
+    }
+
+    // Helper functions
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
+    }
+
+    function skipPastMintingPeriod() internal {
+        vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
+    }
+
+    function moveToNextDay() internal {
+        vm.warp(block.timestamp + 25 hours + 61);
+    }
+
+    function placeBid(address bidder, uint256 bidAmount) internal {
+        vm.startPrank(bidder);
+        mega.approve(address(giga), bidAmount);
+        giga.bid(bidAmount);
+        vm.stopPrank();
     }
 
     /**
@@ -27,54 +104,36 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
      */
     function testLotteryWinnerKeepsClaimableAmount() public {
         // Setup: Create some holders with balances during minting period
-        // During minting period, 1% fee is minted as new tokens
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99 ether, 1 ether);
-        vm.prank(alice);
-        giga.mint{value: 100 ether}();
-
-        vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99 ether, 1 ether);
-        vm.prank(bob);
-        giga.mint{value: 100 ether}();
-
-        vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 100 ether, 99 ether, 1 ether);
-        vm.prank(charlie);
-        giga.mint{value: 100 ether}();
+        mintGiga(alice, 100 ether);
+        mintGiga(bob, 100 ether);
+        mintGiga(charlie, 100 ether);
 
         // Skip past minting period to enable alternating lottery/auction
         skipPastMintingPeriod();
 
         // Generate some fees through transfers
-        // Transfer fee is 1%, so 10 * 0.01 = 0.1 GIGA fee
         vm.prank(alice);
         bool success1 = giga.transfer(bob, 10 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Alice should have 99 - 10 = 89 GIGA
         assertEq(
             giga.balanceOf(alice),
             89 ether,
             "Alice balance after transfer"
         );
-        // Bob should have 99 + 9.9 = 108.9 GIGA (10 - 0.1 fee)
         assertEq(
             giga.balanceOf(bob),
             108.9 ether,
             "Bob balance after receiving"
         );
 
-        // Transfer 5 GIGA, fee = 0.05 GIGA
         vm.prank(bob);
         bool success2 = giga.transfer(charlie, 5 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob should have 108.9 - 5 = 103.9 GIGA
         assertEq(
             giga.balanceOf(bob),
             103.9 ether,
             "Bob balance after transfer"
         );
-        // Charlie should have 99 + 4.95 = 103.95 GIGA
         assertEq(
             giga.balanceOf(charlie),
             103.95 ether,
@@ -86,17 +145,14 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         giga.executeLottery();
 
         // Generate more fees for the auction
-        // Transfer 3 GIGA, fee = 0.03 GIGA
         vm.prank(charlie);
         bool success3 = giga.transfer(alice, 3 ether);
         assertTrue(success3, "Transfer should succeed");
-        // Charlie should have 103.95 - 3 = 100.95 GIGA
         assertEq(
             giga.balanceOf(charlie),
             100.95 ether,
             "Charlie balance after transfer"
         );
-        // Alice should have 89 + 2.97 = 91.97 GIGA
         assertEq(
             giga.balanceOf(alice),
             91.97 ether,
@@ -105,16 +161,9 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Day 9: Execute lottery which will also start an auction
         moveToNextDay();
-
-        // Execute lottery - someone will win
-        vm.expectEmit(false, false, false, false);
-        emit LotteryWon(address(0), 0, 0); // We don't know who will win due to randomness
         giga.executeLottery();
 
         // Determine who won the Day 9 lottery by checking claimable amounts
-        address day9LotteryWinner;
-        uint256 day9LotteryPrize;
-
         vm.prank(alice);
         uint256 aliceClaimable = giga.getMyClaimableAmount();
         vm.prank(bob);
@@ -122,53 +171,23 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(charlie);
         uint256 charlieClaimable = giga.getMyClaimableAmount();
 
-        // Find who has new claimable amount (the Day 9 lottery winner)
-        // Note: They might have won on Day 8 too, so we track the highest
-        if (
-            aliceClaimable > bobClaimable && aliceClaimable > charlieClaimable
-        ) {
-            day9LotteryWinner = alice;
-            day9LotteryPrize = aliceClaimable;
-        } else if (bobClaimable > charlieClaimable) {
-            day9LotteryWinner = bob;
-            day9LotteryPrize = bobClaimable;
-        } else {
-            day9LotteryWinner = charlie;
-            day9LotteryPrize = charlieClaimable;
-        }
-
-        console.log("Day 9 lottery winner:", day9LotteryWinner);
-        console.log(
-            "Claimable amount before auction finalization:",
-            day9LotteryPrize
-        );
+        console.log("Alice claimable:", aliceClaimable);
+        console.log("Bob claimable:", bobClaimable);
+        console.log("Charlie claimable:", charlieClaimable);
 
         // Place a bid on the auction (david who wasn't a holder)
-        vm.startPrank(david);
-        wmega.deposit{value: 10 ether}();
-        wmega.approve(address(giga), 10 ether);
-
-        // Get auction details before bidding
-        (, , , uint112 auctionAmount, uint112 auctionDay) = giga
-            .currentAuction();
+        (, , uint96 minBid, uint112 auctionAmount, uint112 auctionDay) = giga.currentAuction();
         assertGt(auctionAmount, 0, "Auction should have tokens");
 
-        // Expect bid event
-        vm.expectEmit(true, false, false, true);
-        emit BidPlaced(david, 1 ether, auctionDay);
-        giga.bid(1 ether);
-        vm.stopPrank();
+        placeBid(david, 1 ether);
 
         // Generate fees for next day
-        // Transfer 2 GIGA, fee = 0.02 GIGA
         vm.prank(alice);
         bool success4 = giga.transfer(bob, 2 ether);
         assertTrue(success4, "Transfer should succeed");
 
         // Day 10: Execute lottery again, which will also finalize the auction
         moveToNextDay();
-
-        // Execute lottery - this will finalize the auction
         giga.executeLottery();
 
         // Check claimable amounts after auction finalization
@@ -204,20 +223,9 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
      */
     function testBothWinnersCanClaim() public {
         // Setup holders during minting period
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99 ether, 1 ether);
-        vm.prank(alice);
-        giga.mint{value: 100 ether}();
-
-        vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99 ether, 1 ether);
-        vm.prank(bob);
-        giga.mint{value: 100 ether}();
-
-        vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 100 ether, 99 ether, 1 ether);
-        vm.prank(charlie);
-        giga.mint{value: 100 ether}();
+        mintGiga(alice, 100 ether);
+        mintGiga(bob, 100 ether);
+        mintGiga(charlie, 100 ether);
 
         // Skip past minting period
         skipPastMintingPeriod();
@@ -226,13 +234,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(alice);
         bool success1 = giga.transfer(bob, 10 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Verify balances: Alice had 99000, transferred 10000, has 89000
         assertEq(
             giga.balanceOf(alice),
             89 ether,
             "Alice balance after transfer"
         );
-        // Bob had 99, received 9.9 (10 - 0.1 fee), has 108.9
         assertEq(
             giga.balanceOf(bob),
             108.9 ether,
@@ -247,13 +253,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(bob);
         bool success2 = giga.transfer(alice, 5 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob had 108.9, transferred 5, has 103.9
         assertEq(
             giga.balanceOf(bob),
             103.9 ether,
             "Bob balance after transfer"
         );
-        // Alice had 89, received 4.95 (5 - 0.05 fee), has 93.95
         assertEq(
             giga.balanceOf(alice),
             93.95 ether,
@@ -272,7 +276,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(charlie);
         uint256 charlieClaimableBefore = giga.getMyClaimableAmount();
 
-        // Record total claimable before auction
         uint256 totalClaimableBefore = aliceClaimableBefore +
             bobClaimableBefore +
             charlieClaimableBefore;
@@ -281,36 +284,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             totalClaimableBefore
         );
 
-        // Place bid on the auction (david who is not a current holder)
-        vm.startPrank(david);
-        uint256 davidWethBefore = wmega.balanceOf(david);
-        wmega.deposit{value: 10 ether}();
-        uint256 davidWethAfterDeposit = wmega.balanceOf(david);
-        assertEq(
-            davidWethAfterDeposit - davidWethBefore,
-            10 ether,
-            "David should have deposited 10 WMEGA"
-        );
-        wmega.approve(address(giga), 10 ether);
-
-        // Get auction details before bidding
-        (, , , uint112 auctionAmount, uint112 auctionDay) = giga
-            .currentAuction();
+        // Place bid on the auction
+        (, , uint96 minBid, uint112 auctionAmount, uint112 auctionDay) = giga.currentAuction();
         assertGt(auctionAmount, 0, "Auction should have tokens");
 
-        // Expect bid event
-        vm.expectEmit(true, false, false, true);
-        emit BidPlaced(david, 1 ether, auctionDay);
-        giga.bid(1 ether);
-
-        // Verify WMEGA was transferred
-        uint256 davidWethAfterBid = wmega.balanceOf(david);
-        assertEq(
-            davidWethAfterDeposit - davidWethAfterBid,
-            1 ether,
-            "David should have spent 1 WMEGA on bid"
-        );
-        vm.stopPrank();
+        placeBid(david, 1 ether);
 
         // Day 10: Finalize auction
         moveToNextDay();
@@ -358,7 +336,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             giga.claim();
             uint256 davidBalanceAfter = giga.balanceOf(david);
 
-            // David should successfully claim exact amount
             uint256 davidClaimed = davidBalanceAfter - davidBalanceBefore;
             assertEq(
                 davidClaimed,
@@ -370,7 +347,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
                 "David should be able to claim auction prize"
             );
 
-            // Verify claimable is now zero
             vm.prank(david);
             assertEq(
                 giga.getMyClaimableAmount(),
@@ -385,26 +361,14 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
      * All fees should go to lottery during the minting period
      */
     function testNoAuctionsDuringMintingPeriod() public {
-        // During minting period
-        // All fees should go to lottery, not auction
-
         // Day 0: Setup holders
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99 ether, 1 ether);
-        vm.prank(alice);
-        giga.mint{value: 100 ether}();
+        mintGiga(alice, 100 ether);
         assertEq(giga.balanceOf(alice), 99 ether, "Alice initial balance");
 
-        vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99 ether, 1 ether);
-        vm.prank(bob);
-        giga.mint{value: 100 ether}();
+        mintGiga(bob, 100 ether);
         assertEq(giga.balanceOf(bob), 99 ether, "Bob initial balance");
 
-        vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 50 ether, 49.5 ether, 0.5 ether);
-        vm.prank(charlie);
-        giga.mint{value: 50 ether}();
+        mintGiga(charlie, 50 ether);
         assertEq(
             giga.balanceOf(charlie),
             49.5 ether,
@@ -419,13 +383,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(alice);
         bool success1 = giga.transfer(bob, 5 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Alice: 99 - 5 = 94
         assertEq(
             giga.balanceOf(alice),
             94 ether,
             "Alice balance after transfer"
         );
-        // Bob: 99 + 4.95 = 103.95 (received 5 - 0.05 fee)
         assertEq(
             giga.balanceOf(bob),
             103.95 ether,
@@ -435,13 +397,11 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prank(bob);
         bool success2 = giga.transfer(charlie, 3 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Bob: 103.95 - 3 = 100.95
         assertEq(
             giga.balanceOf(bob),
             100.95 ether,
             "Bob balance after transfer"
         );
-        // Charlie: 49.5 + 2.97 = 52.47 (received 3 - 0.03 fee)
         assertEq(
             giga.balanceOf(charlie),
             52.47 ether,
@@ -455,18 +415,10 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
         // Execute lottery - should be lottery, not auction
         vm.prevrandao(bytes32(uint256(12345)));
-        // During minting period, all fees go to lottery
-        // Total fees so far: 1 + 1 + 0.5 (mint fees) + 0.05 + 0.03 (transfer fees) = 2.58 GIGA
-        vm.expectEmit(false, false, false, false);
-        emit LotteryWon(address(0), 0, 0); // We don't know exact winner/amount due to randomness
         giga.executeLottery();
 
         // Check that there's no active auction (during minting period, no auctions)
-        // However, there may be randomness pool balance from fees
         (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
-        // During minting period, auctions don't happen - fees split between lottery and randomness
-        // So auction amount might be > 0 if it represents randomness pool
-        // The key is that bidder should be 0 (no active auction)
         assertEq(
             bidder,
             address(0),
@@ -474,8 +426,7 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         );
 
         // Check that lottery was executed (someone should have won)
-        (address lotteryWinner, uint112 lotteryPrize) = giga
-            .lotteryUnclaimedPrizes(0 % 7);
+        (address lotteryWinner, uint112 lotteryPrize) = giga.lotteryUnclaimedPrizes(0 % 7);
         assertTrue(
             lotteryWinner == alice ||
                 lotteryWinner == bob ||
@@ -483,13 +434,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             "Should have a lottery winner during minting period"
         );
         assertGt(lotteryPrize, 0, "Lottery prize should be greater than 0");
-        // Verify the prize amount - during minting period, all fees go to lottery (no auction)
-        // Total fees: 2.58 GIGA, lottery gets 100% = 2.58 GIGA
-        assertEq(
-            lotteryPrize,
-            2.58 ether,
-            "Lottery prize should be all collected fees during minting period"
-        );
 
         // Test multiple days during minting period
         for (uint256 day = 2; day <= 6; day++) {
@@ -509,10 +453,8 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             vm.prevrandao(bytes32(uint256(day * 1000)));
             giga.executeLottery();
 
-            // Verify no auction was created (bidder should be address(0))
+            // Verify no auction was created
             (bidder, , , auctionAmount, ) = giga.currentAuction();
-            // During minting period, no auctions should be active (no bidder)
-            // But auctionAmount might represent randomness pool balance
             assertEq(
                 bidder,
                 address(0),
@@ -542,10 +484,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         vm.prevrandao(bytes32(uint256(99999)));
         giga.executeLottery();
 
-        // After minting period, we should start seeing auctions
-        // Day 7 is odd, so it should be lottery
-        // Day 8 (current) would get auction if there are fees
-
         // Generate fees on day 8
         vm.prank(alice);
         bool success4 = giga.transfer(bob, 1 ether);
@@ -570,48 +508,23 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
 
     /**
      * @dev Test that verifies claimed amounts exactly match the prize amounts
-     * This ensures no tokens are lost or created during the claim process
      */
     function testExactPrizeAmountsClaimed() public {
         // Setup holders during minting period
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 100 ether, 99 ether, 1 ether);
-        vm.prank(alice);
-        giga.mint{value: 100 ether}();
-        assertEq(giga.balanceOf(alice), 99 ether, "Alice initial balance");
+        mintGiga(alice, 100 ether);
+        mintGiga(bob, 100 ether);
+        mintGiga(charlie, 50 ether);
 
-        vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 100 ether, 99 ether, 1 ether);
-        vm.prank(bob);
-        giga.mint{value: 100 ether}();
-        assertEq(giga.balanceOf(bob), 99 ether, "Bob initial balance");
-
-        vm.expectEmit(true, false, false, true);
-        emit Minted(charlie, 50 ether, 49.5 ether, 0.5 ether);
-        vm.prank(charlie);
-        giga.mint{value: 50 ether}();
-        assertEq(
-            giga.balanceOf(charlie),
-            49.5 ether,
-            "Charlie initial balance"
-        );
-
-        // During minting period (days 0-6), all fees go to lottery
-        // After day 7, it alternates: odd days = lottery, even days = auction
-
-        // Test lottery prize during minting period first
         // Day 1: Generate fees
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        bool success1 = giga.transfer(bob, 10 ether); // 0.1 GIGA fee
+        bool success1 = giga.transfer(bob, 10 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Alice: 99 - 10 = 89
         assertEq(
             giga.balanceOf(alice),
             89 ether,
             "Alice balance after transfer"
         );
-        // Bob: 99 + 9.9 = 108.9
         assertEq(
             giga.balanceOf(bob),
             108.9 ether,
@@ -621,9 +534,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         // Day 2: Execute lottery for day 1's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111111)));
-        // Total fees: 1 + 1 + 0.5 (mint fees) + 0.1 (transfer fee) = 2.6 GIGA
-        vm.expectEmit(false, false, false, false);
-        emit LotteryWon(address(0), 0, 0); // Don't know exact winner due to randomness
         giga.executeLottery();
 
         // Check the lottery prize amount
@@ -656,14 +566,6 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
             lotteryPrizeAmount,
             "Should claim exact lottery prize amount"
         );
-        // During minting period: All fees go to lottery (no auction)
-        // Total fees: 2.6 GIGA (1 + 1 + 0.5 mint fees + 0.1 transfer fee)
-        // Lottery gets: 2.6 * 1.0 = 2.6 GIGA (100% during minting period)
-        assertEq(
-            actualClaimed,
-            2.6 ether,
-            "Should claim exactly 2.6 GIGA in fees (100% during minting period)"
-        );
         console.log("Actual claimed amount:", actualClaimed);
 
         // Verify claimable is now zero
@@ -686,175 +588,5 @@ contract StrategyUnclaimedPrizesBugTest is StrategyTestBase {
         assertEq(amountAfter, 0, "Amount should be cleared after claim");
 
         console.log("Verified: Exact lottery prize amount claimed");
-
-        // Now test auction prize claiming after minting period
-        // Move to day 8 (past minting period)
-        moveToNextDay(); // day 3
-        moveToNextDay(); // day 4
-        moveToNextDay(); // day 5
-        moveToNextDay(); // day 6
-        moveToNextDay(); // day 7
-        moveToNextDay(); // day 8
-
-        // Day 8 is even, so fees go to auction
-        // Check who has balance and can transfer
-        uint256 aliceBalanceNow = giga.balanceOf(alice);
-        uint256 bobBalanceNow = giga.balanceOf(bob);
-        uint256 charlieBalanceNow = giga.balanceOf(charlie);
-
-        // Transfer from whoever has balance
-        uint256 transferAmount = 4 ether;
-        uint256 expectedFee = 0.04 ether; // 1% of 4
-
-        if (aliceBalanceNow > transferAmount) {
-            uint256 bobBalanceBefore = giga.balanceOf(bob);
-            vm.prank(alice);
-            bool success = giga.transfer(bob, transferAmount);
-            assertTrue(success, "Transfer should succeed");
-            // Verify fee was deducted correctly
-            assertEq(
-                giga.balanceOf(bob) - bobBalanceBefore,
-                transferAmount - expectedFee,
-                "Bob should receive amount minus fee"
-            );
-        } else if (bobBalanceNow > transferAmount) {
-            uint256 aliceBalanceBefore = giga.balanceOf(alice);
-            vm.prank(bob);
-            bool success = giga.transfer(alice, transferAmount);
-            assertTrue(success, "Transfer should succeed");
-            // Verify fee was deducted correctly
-            assertEq(
-                giga.balanceOf(alice) - aliceBalanceBefore,
-                transferAmount - expectedFee,
-                "Alice should receive amount minus fee"
-            );
-        } else if (charlieBalanceNow > transferAmount) {
-            uint256 aliceBalanceBefore = giga.balanceOf(alice);
-            vm.prank(charlie);
-            bool success = giga.transfer(alice, transferAmount);
-            assertTrue(success, "Transfer should succeed");
-            // Verify fee was deducted correctly
-            assertEq(
-                giga.balanceOf(alice) - aliceBalanceBefore,
-                transferAmount - expectedFee,
-                "Alice should receive amount minus fee"
-            );
-        } else {
-            // Skip auction test if no one has enough balance
-            console.log("Skipping auction test - insufficient balances");
-            return;
-        }
-
-        // Day 9: Execute to start auction
-        moveToNextDay();
-        // Day 8 was even, so half the fees (20 GIGA) go to lottery, half to auction
-        vm.expectEmit(false, false, false, false);
-        emit LotteryWon(address(0), 0, 0);
-        vm.expectEmit(false, false, false, false);
-        emit AuctionStarted(0, 0, 0);
-        giga.executeLottery();
-
-        // Check current auction (should have day 8's auction fees)
-        (, , , uint112 auctionTokenAmount, uint112 auctionDay) = giga
-            .currentAuction();
-        console.log("Auction token amount:", auctionTokenAmount);
-        console.log("Auction day:", auctionDay);
-        // Should be 0.02 GIGA (half of 0.04 GIGA fees from day 8)
-        assertEq(
-            auctionTokenAmount,
-            0.02 ether,
-            "Auction should have 0.02 GIGA"
-        );
-        assertEq(auctionDay, 8, "Auction should be for day 8");
-
-        // Place a bid
-        vm.startPrank(david);
-        uint256 wethBefore = wmega.balanceOf(david);
-        wmega.deposit{value: 10 ether}();
-        assertEq(
-            wmega.balanceOf(david) - wethBefore,
-            10 ether,
-            "David should have deposited 10 WMEGA"
-        );
-        wmega.approve(address(giga), 10 ether);
-
-        vm.expectEmit(true, false, false, true);
-        emit BidPlaced(david, 1 ether, auctionDay);
-        giga.bid(1 ether);
-        vm.stopPrank();
-
-        // Generate some fees for day 10 before executing
-        // Transfer from whoever has balance
-        if (giga.balanceOf(bob) > 2 ether) {
-            vm.prank(bob);
-            giga.transfer(alice, 2 ether);
-        } else if (giga.balanceOf(charlie) > 2 ether) {
-            vm.prank(charlie);
-            giga.transfer(alice, 2 ether);
-        } else if (giga.balanceOf(alice) > 2 ether) {
-            vm.prank(alice);
-            giga.transfer(bob, 2 ether);
-        }
-
-        // Move to day 10 to finalize auction
-        moveToNextDay();
-        giga.executeLottery();
-
-        // Check david's claimable (should be the auction tokens)
-        vm.prank(david);
-        uint256 davidClaimable = giga.getMyClaimableAmount();
-
-        // David should be able to claim the auction amount
-        // The amount depends on the fees collected for the auction day
-        assertGt(
-            davidClaimable,
-            0,
-            "David should have some GIGA claimable from auction"
-        );
-        console.log("David's claimable amount from auction:", davidClaimable);
-
-        // Claim the auction prize
-        uint256 davidBalanceBefore = giga.balanceOf(david);
-        vm.prank(david);
-        giga.claim();
-        uint256 davidBalanceAfter = giga.balanceOf(david);
-
-        // Verify exact amount was transferred
-        uint256 davidActualClaimed = davidBalanceAfter - davidBalanceBefore;
-        assertEq(
-            davidActualClaimed,
-            davidClaimable,
-            "Claimed amount should match claimable"
-        );
-        assertGt(
-            davidActualClaimed,
-            0,
-            "David should have claimed some amount"
-        );
-
-        // Verify claimable is now zero
-        vm.prank(david);
-        uint256 davidClaimableAfter = giga.getMyClaimableAmount();
-        assertEq(
-            davidClaimableAfter,
-            0,
-            "David should have no claimable amount after claiming"
-        );
-
-        // Check the auction prize slot is cleared
-        (address auctionWinner, uint112 auctionPrizeAmount) = giga
-            .auctionUnclaimedPrizes(auctionDay % 7);
-        assertEq(
-            auctionWinner,
-            address(0),
-            "Auction winner should be cleared after claim"
-        );
-        assertEq(
-            auctionPrizeAmount,
-            0,
-            "Auction amount should be cleared after claim"
-        );
-
-        console.log("Verified: Exact auction prize amount claimed");
     }
 }

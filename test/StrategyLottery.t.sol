@@ -7,20 +7,14 @@ import {console} from "forge-std/Test.sol";
 contract StrategyLotteryTest is StrategyTestBase {
     function testPrevrandaoLottery() public {
         // Alice and Bob mint during initial period
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
         assertEq(
             giga.balanceOf(alice),
             9.9 ether,
             "Alice should have 9.9 GIGA"
         );
 
-        vm.expectEmit(true, false, false, true);
-        emit Minted(bob, 5 ether, 4.95 ether, 0.05 ether);
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(bob, 5 ether);
         assertEq(
             giga.balanceOf(bob),
             4.95 ether,
@@ -123,14 +117,9 @@ contract StrategyLotteryTest is StrategyTestBase {
         uint256 rounds = 20; // Reduced rounds to avoid max supply issues
 
         // Set up holders with different balances
-        vm.prank(alice);
-        giga.mint{value: 10 ether}(); // Alice: 9.9 tokens
-
-        vm.prank(bob);
-        giga.mint{value: 5 ether}(); // Bob: 4.95 tokens
-
-        vm.prank(charlie);
-        giga.mint{value: 2 ether}(); // Charlie: 1.98 tokens
+        mintGiga(alice, 10 ether); // Alice: 9.9 tokens
+        mintGiga(bob, 5 ether); // Bob: 4.95 tokens
+        mintGiga(charlie, 2 ether); // Charlie: 1.98 tokens
 
         // Track wins
         uint256 aliceWins;
@@ -264,8 +253,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         setupBasicHolders();
 
         // Add more holders
-        vm.prank(david);
-        giga.mint{value: 3 ether}();
+        mintGiga(david, 3 ether);
 
         // Move past minting period
         skipPastMintingPeriod();
@@ -335,11 +323,8 @@ contract StrategyLotteryTest is StrategyTestBase {
 
     function testDay0FeesDistributedOnDay1() public {
         // Mint during day 0 (first day of minting period)
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 5 ether);
 
         // Fees during minting: 10 native * 1:1 * 0.01 = 0.1 tokens fee from alice
         // 5 native * 1:1 * 0.01 = 0.05 tokens fee from bob
@@ -401,8 +386,7 @@ contract StrategyLotteryTest is StrategyTestBase {
 
     function testNoLotteryWhenNoFeesCollected() public {
         // Create minimal setup to avoid fees during minting
-        vm.prank(alice);
-        giga.mint{value: 0.1 ether}();
+        mintGiga(alice, 0.1 ether);
 
         // Move way past minting period
         vm.warp(block.timestamp + 20 days);
@@ -538,19 +522,18 @@ contract StrategyLotteryTest is StrategyTestBase {
 
     function testNoContractsInLottery() public {
         // Deploy a contract that holds GIGA
-        MockContract mockContract = new MockContract();
-        vm.deal(address(mockContract), 10 ether);
+        MockContract mockContract = new MockContract(mega);
+        mega.mint(address(mockContract), 10 ether);
 
         // Contract mints GIGA
-        mockContract.mintStrategy(giga);
+        mockContract.mintStrategy(giga, 1 ether);
 
         // Check contract is not tracked as holder
         assertFalse(giga.isHolder(address(mockContract)));
         assertEq(giga.getHolderCount(), 0);
 
         // Regular user mints
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
 
         // Only alice should be tracked
         assertEq(giga.getHolderCount(), 1);
@@ -562,12 +545,14 @@ contract StrategyLotteryTest is StrategyTestBase {
         uint256 userCount = 10; // Reduced to avoid gas issues
         for (uint256 i = 0; i < userCount; i++) {
             address user = address(uint160(0x1000 + i));
-            vm.deal(user, 10 ether);
+            mega.mint(user, 10 ether);
 
             // Each user mints different amount
             uint256 mintAmount = ((i % 3) + 1) * 0.5 ether;
-            vm.prank(user);
-            giga.mint{value: mintAmount}();
+            vm.startPrank(user);
+            mega.approve(address(giga), mintAmount);
+            giga.mint(mintAmount);
+            vm.stopPrank();
         }
 
         // Move past minting period

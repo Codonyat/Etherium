@@ -3,16 +3,8 @@ pragma solidity ^0.8.24;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {IERC20} from "./interfaces/IExternalTokens.sol";
-
-interface IWMEGA {
-    function deposit() external payable;
-    function withdraw(uint256) external;
-    function transfer(address, uint256) external returns (bool);
-    function transferFrom(address, address, uint256) external returns (bool);
-    function balanceOf(address) external view returns (uint256);
-    function approve(address, uint256) external returns (bool);
-}
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title GigaETH
@@ -21,19 +13,20 @@ interface IWMEGA {
  * - Redemption: Proportional share of contract's MEGA (GIGA * MEGA balance / total supply)
  * - 1% fee on mint/burn/transfer (split between lottery and auction pools)
  * - Daily lottery for random holder using prevrandao
- * - Daily auctions using WMEGA to prevent DoS attacks
+ * - Daily auctions using ERC20 MEGA
  * - Users can lock community tokens during minting period to mint without fees (optional)
  * - Efficient winner selection using Fenwick tree (Binary Indexed Tree)
  * - Uses transient storage for reentrancy guard (EIP-1153) for gas efficiency
  */
 contract Strategy is ERC20, ReentrancyGuardTransient {
+    using SafeERC20 for IERC20;
     // Conversion: 1000 MEGA = 1 GIGA (MEGA has 18 decimals, GIGA has 21 decimals)
-    uint256 public constant DECIMALS = 21;
+    uint256 private constant DECIMALS = 21;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 3 days;
     uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e24;
-    uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 1 days; // 1 month from deployment
+    uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 30 days; // 1 month from deployment
 
     // Synthetic addresses for fee management
     address public constant FEES_POOL =
@@ -99,24 +92,26 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     // Or set to your community token address before deployment
     IERC20 public constant COMMUNITY_TOKEN = IERC20(address(0));
 
-    // WMEGA integration for auctions
-    // MegaETH Testnet (chain id 6343) WMEGA: TBD
-    // MegaETH Mainnet WMEGA: TBD
-    IWMEGA public immutable wmega;
+    // MEGA token (ERC20) - the backing asset for GIGA
+    IERC20 public immutable mega;
+
+    // Track MEGA escrowed for auction bids (separate from reserve)
+    // This ensures bid amounts don't inflate the apparent reserve
+    uint256 public escrowedBidMega;
 
     // Track community tokens locked per user during minting period
     mapping(address user => uint256 amount) public communityTokenLocked;
 
     event Minted(
         address indexed to,
-        uint256 nativeAmount,
+        uint256 collateralAmount,
         uint256 tokenAmount,
         uint256 fee
     );
     event Redeemed(
         address indexed from,
         uint256 tokenAmount,
-        uint256 nativeAmount,
+        uint256 collateralAmount,
         uint256 fee
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
@@ -158,16 +153,24 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     Auction public currentAuction;
 
     /**
-     * @param _wmega Address of WMEGA token for auctions
+     * @param _mega Address of MEGA ERC20 token (the backing asset)
      */
-    constructor(address _wmega) ERC20("GigaETH", "GIGA") {
+    constructor(address _mega) ERC20("GigaETH", "GIGA") {
         deploymentTime = block.timestamp;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
-        wmega = IWMEGA(_wmega);
+        mega = IERC20(_mega);
     }
 
     function decimals() public pure override returns (uint8) {
         return uint8(DECIMALS);
+    }
+
+    /**
+     * @dev Get the MEGA reserve (total MEGA balance minus escrowed bid amounts)
+     * This is the actual backing for GIGA tokens, excluding auction bid escrow
+     */
+    function getMegaReserve() public view returns (uint256) {
+        return mega.balanceOf(address(this)) - escrowedBidMega;
     }
 
     /**
@@ -182,23 +185,20 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     }
 
     /**
-     * @dev Accept MEGA from anyone - donations benefit all token holders proportionally
+     * @dev Reject native ETH transfers - use mint() with ERC20 MEGA instead
      */
     receive() external payable {
-        // Accept all MEGA transfers with no data
-        // This allows:
-        // 1. WMEGA withdrawals for auctions
-        // 2. Community donations that increase backing value
-        // 3. Failed beneficiary transfers to not revert
+        revert("Use mint() with ERC20 MEGA");
     }
 
     /**
      * @dev Mint GIGA by depositing MEGA (standard minting with fees)
      * During minting period: 1000 MEGA = 1 GIGA (1:1 in base units)
      * After minting period: Can only mint up to available capacity
+     * @param collateralAmount Amount of MEGA to deposit (requires prior approval)
      */
-    function mint() external payable nonReentrant {
-        require(msg.value > 0, "Must send MEGA");
+    function mint(uint256 collateralAmount) external nonReentrant {
+        require(collateralAmount > 0, "Must send MEGA");
 
         // Check and set max supply before any potential burns
         _checkAndSetMaxSupply();
@@ -210,21 +210,25 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         uint256 fee;
         uint256 netTokens;
 
-        // Get balance before minting
+        // Get reserve BEFORE transfer for accurate calculation
+        uint256 megaReserveBefore = getMegaReserve();
+
+        // Transfer MEGA from user (requires prior approval)
+        mega.safeTransferFrom(msg.sender, address(this), collateralAmount);
+
         if (block.timestamp <= mintingEndTime) {
             // During minting period: 1:1 in base units (1000 MEGA = 1 GIGA in display units)
-            tokensToMint = msg.value;
+            tokensToMint = collateralAmount;
         } else {
             // After minting period: proportional to MEGA/supply ratio
-            uint256 megaBalance = address(this).balance - msg.value; // Exclude sent MEGA
-            if (totalSupply() > 0 && megaBalance > 0) {
+            if (totalSupply() > 0 && megaReserveBefore > 0) {
                 // Mint proportionally to maintain MEGA backing ratio
-                // Overflow safety: msg.value, totalSupply < 100B * 1e18, msg.value * totalSupply < 2^2^256
-                tokensToMint = (msg.value * totalSupply()) / megaBalance;
+                tokensToMint =
+                    (collateralAmount * totalSupply()) /
+                    megaReserveBefore;
             } else {
                 // Fallback to 1:1 if no supply or MEGA
-                // Overflow safety: msg.value < 2^96 (fits in uint256)
-                tokensToMint = msg.value;
+                tokensToMint = collateralAmount;
             }
 
             require(
@@ -246,7 +250,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         // No need for manual Fenwick update - handled atomically in _update
 
-        emit Minted(msg.sender, msg.value, netTokens, fee);
+        emit Minted(msg.sender, collateralAmount, netTokens, fee);
     }
 
     /**
@@ -254,13 +258,14 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
      * Each lock allows one fee-free mint
      * 1000 MEGA = 1 GIGA (no fees deducted)
      * Disabled if COMMUNITY_TOKEN is address(0)
+     * @param collateralAmount Amount of MEGA to deposit (requires prior approval)
      */
-    function mintFeeFree() external payable nonReentrant {
+    function mintFeeFree(uint256 collateralAmount) external nonReentrant {
         require(
             address(COMMUNITY_TOKEN) != address(0),
             "Fee-free minting disabled"
         );
-        require(msg.value > 0, "Must send MEGA");
+        require(collateralAmount > 0, "Must send MEGA");
         require(
             block.timestamp <= mintingEndTime,
             "Fee-free minting only during minting period"
@@ -268,6 +273,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         // Try to execute pending lottery/auction before changing state
         _tryExecuteLotteryAndAuction();
+
+        // Transfer MEGA from user (requires prior approval)
+        mega.safeTransferFrom(msg.sender, address(this), collateralAmount);
 
         // Transfer community tokens from user to lock
         require(
@@ -283,8 +291,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         communityTokenLocked[msg.sender] += COMMUNITY_TOKEN_LOCK_AMOUNT;
 
         // Mint without fees, 1:1 in base units (1000 MEGA = 1 GIGA in display units)
-        // Overflow safety: msg.value < 2^96 (fits in uint256)
-        uint256 tokensToMint = msg.value;
+        uint256 tokensToMint = collateralAmount;
 
         // After minting period: enforce max supply limit
         if (block.timestamp > mintingEndTime) {
@@ -305,7 +312,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             deploymentTime + COMMUNITY_TOKEN_UNLOCK_TIME
         );
 
-        emit Minted(msg.sender, msg.value, tokensToMint, 0);
+        emit Minted(msg.sender, collateralAmount, tokensToMint, 0);
     }
 
     /**
@@ -343,7 +350,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Redeem GIGA for MEGA
-     * Returns proportional share of contract's MEGA balance (minus 1% fee)
+     * Returns proportional share of contract's MEGA reserve (minus 1% fee)
      */
     function redeem(uint256 amount) external nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
@@ -359,7 +366,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         uint256 netTokens = amount - fee;
 
         // Calculate proportional MEGA to return before state changes
-        uint256 megaToReturn = (netTokens * address(this).balance) /
+        // Use getMegaReserve() to exclude escrowed bid amounts
+        uint256 collateralToReturn = (netTokens * getMegaReserve()) /
             totalSupply();
 
         // Transfer fees atomically (Fenwick tree updated automatically)
@@ -371,10 +379,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         _burn(msg.sender, netTokens);
 
         // Transfer proportional MEGA back to user
-        (bool success, ) = msg.sender.call{value: megaToReturn}("");
-        require(success, "MEGA transfer failed");
+        mega.safeTransfer(msg.sender, collateralToReturn);
 
-        emit Redeemed(msg.sender, amount, megaToReturn, fee);
+        emit Redeemed(msg.sender, amount, collateralToReturn, fee);
     }
 
     /**
@@ -764,20 +771,29 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                     (currentBeneficiaryIndex + 1) % BENEFICIARIES.length
                 );
 
-                // Calculate MEGA value of the GIGA prize
-                // MEGA amount = (GIGA amount * contract MEGA balance) / total supply
-                uint256 megaToSend = (uint256(prize.amount) *
-                    address(this).balance) / totalSupply();
+                // Calculate MEGA value of the GIGA prizeToSend
+                // MEGA amount = (GIGA amount * MEGA reserve) / total supply
+                uint256 collateralToSend = (uint256(prize.amount) *
+                    getMegaReserve()) / totalSupply();
 
-                // Attempt to send MEGA to beneficiary
-                (bool success, ) = beneficiary.call{value: megaToSend}("");
+                // Attempt to send MEGA to beneficiary using low-level call
+                // This handles both standard and non-standard ERC20 implementations
+                (bool success, bytes memory data) = address(mega).call(
+                    abi.encodeCall(
+                        IERC20.transfer,
+                        (beneficiary, collateralToSend)
+                    )
+                );
+                success =
+                    success &&
+                    (data.length == 0 || abi.decode(data, (bool)));
 
                 if (success) {
                     // MEGA transfer successful, now burn the GIGA tokens from lottery pool
                     _burn(LOT_POOL, prize.amount);
                     emit BeneficiaryFunded(
                         beneficiary,
-                        megaToSend, // Emit the actual MEGA amount sent
+                        collateralToSend, // Emit the actual MEGA amount sent
                         prize.winner
                     );
                 } else {
@@ -1042,10 +1058,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         }
 
         // Calculate minimum bid for the GIGA amount being auctioned
-        // MinBid = (MEGA balance * feesToDistribute) / (2 * totalSupply)
+        // MinBid = (MEGA reserve * feesToDistribute) / (2 * totalSupply)
         // This sets the minimum bid at 50% of the redemption value
-        // Overflow safety: balance < 2^96, feesToDistribute < 2^112, product < 2^208
-        uint256 minBid = (address(this).balance * feesToDistribute) /
+        // Overflow safety: reserve < 2^96, feesToDistribute < 2^112, product < 2^208
+        uint256 minBid = (getMegaReserve() * feesToDistribute) /
             (2 * totalSupply());
 
         // Transfer fees from fees pool to lottery pool for auction
@@ -1095,24 +1111,33 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             );
 
             // Calculate MEGA value of the GIGA prize
-            // MEGA amount = (GIGA amount * contract MEGA balance) / total supply
-            uint256 megaToSend = (uint256(prize.amount) *
-                address(this).balance) / totalSupply();
+            // MEGA amount = (GIGA amount * MEGA reserve) / total supply
+            uint256 collateralToSend = (uint256(prize.amount) *
+                getMegaReserve()) / totalSupply();
 
-            (bool success, ) = beneficiary.call{value: megaToSend}("");
+            // Attempt to send MEGA to beneficiary using low-level call
+            // This handles both standard and non-standard ERC20 implementations
+            (bool success, bytes memory data) = address(mega).call(
+                abi.encodeCall(IERC20.transfer, (beneficiary, collateralToSend))
+            );
+            success = success && (data.length == 0 || abi.decode(data, (bool)));
 
             if (success) {
                 _burn(LOT_POOL, prize.amount);
-                emit BeneficiaryFunded(beneficiary, megaToSend, prize.winner); // Emit actual MEGA amount
+                emit BeneficiaryFunded(
+                    beneficiary,
+                    collateralToSend,
+                    prize.winner
+                ); // Emit actual MEGA amount
             } else {
                 // Add to current winner's prize
                 currentAuction.auctionTokens += uint112(prize.amount);
             }
         }
 
-        // Convert WMEGA to MEGA for the winning bid
-        // This is safe because we control when this happens (no external call that could revert)
-        wmega.withdraw(currentAuction.currentBid);
+        // Move bid MEGA from escrow to reserve (accounting change only)
+        // The MEGA tokens are already in the contract, just reclassifying them
+        escrowedBidMega -= currentAuction.currentBid;
 
         // Store new prize
         prize.winner = currentAuction.currentBidder;
@@ -1128,21 +1153,18 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Place a bid in the current auction
-     * The bidder must have approved WMEGA that is at least 10% higher than the current bid
+     * The bidder must have approved MEGA for at least 10% higher than the current bid
      * Winning bid gets the auctioned GIGA tokens
-     * Previous bidder gets their WMEGA refunded immediately
-     *
-     * Bidder can send MEGA as well which then gets wrapped in into WMEGA.
+     * Previous bidder gets their MEGA refunded immediately
      *
      * We enforce a 10% minimum increment to make auctions more accessible to non-bot participants.
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
      * that might otherwise place marginally higher bids repeatedly.
      *
-     * Using WMEGA prevents griefing attacks where malicious bidders could block refunds
-     * by reverting in their receive() function.
+     * @param bidAmount Amount of MEGA to bid (requires prior approval)
      */
-    function bid(uint256 bidAmount) external payable nonReentrant {
+    function bid(uint256 bidAmount) external nonReentrant {
         require(currentAuction.auctionDay != 0, "No active auction");
 
         // Check and set max supply (for consistency)
@@ -1158,21 +1180,13 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
-        // Handle native MEGA bidding
-        if (msg.value > 0) {
-            // Override bidAmount with msg.value for native MEGA
-            bidAmount = msg.value;
-            // Wrap native MEGA to WMEGA
-            wmega.deposit{value: msg.value}();
-        } else {
-            // Transfer the bid to the contract
-            require(
-                wmega.transferFrom(msg.sender, address(this), bidAmount),
-                "WMEGA transfer failed"
-            );
-        }
-
         require(bidAmount >= minBid, "Bid too low");
+
+        // Transfer MEGA from bidder (requires prior approval)
+        mega.safeTransferFrom(msg.sender, address(this), bidAmount);
+
+        // Track as escrowed (not part of reserve until auction finalizes)
+        escrowedBidMega += bidAmount;
 
         // Store previous bidder info
         address previousBidder = currentAuction.currentBidder;
@@ -1184,12 +1198,11 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         emit BidPlaced(msg.sender, bidAmount, currentAuction.auctionDay);
 
-        // Refund previous bidder if exists (in WMEGA)
+        // Refund previous bidder if exists
         if (previousBidder != address(0)) {
-            require(
-                wmega.transfer(previousBidder, previousBid),
-                "WMEGA refund failed"
-            );
+            // Remove from escrow before transfer
+            escrowedBidMega -= previousBid;
+            mega.safeTransfer(previousBidder, previousBid);
             emit BidRefunded(previousBidder, previousBid);
         }
     }

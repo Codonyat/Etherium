@@ -2,22 +2,15 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {Strategy} from "../src/Strategy.sol";
 
-// Mock WMEGA for testing
-contract MockWMEGA {
+// Mock ERC20 MEGA for testing
+contract MockMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    function deposit() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
-
-    function withdraw(uint256 amount) external {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MEGA transfer failed");
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -49,40 +42,45 @@ contract MockWMEGA {
 
         return true;
     }
-
-    receive() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
 }
 
 contract StrategySecurityTest is Test {
     Strategy public giga;
-    MockWMEGA public wmega;
+    MockMEGA public mega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
     address public charlie = address(0x3);
 
     function setUp() public {
-        wmega = new MockWMEGA();
-        giga = new Strategy(address(wmega));
+        mega = new MockMEGA();
+        giga = new Strategy(address(mega));
 
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
-        vm.deal(charlie, 100 ether);
+        mega.mint(alice, 100 ether);
+        mega.mint(bob, 100 ether);
+        mega.mint(charlie, 100 ether);
+    }
+
+    // Helper to mint GIGA tokens
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
     }
 
     // ============ Zero Amount Operations ============
 
-    function testMintZeroNative() public {
-        vm.prank(alice);
+    function testMintZeroAmount() public {
+        vm.startPrank(alice);
+        mega.approve(address(giga), 0);
         vm.expectRevert("Must send MEGA");
-        giga.mint{value: 0}();
+        giga.mint(0);
+        vm.stopPrank();
     }
 
     function testRedeemZeroAmount() public {
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
 
         vm.prank(alice);
         vm.expectRevert("Amount must be greater than 0");
@@ -90,8 +88,7 @@ contract StrategySecurityTest is Test {
     }
 
     function testTransferZeroAmount() public {
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
 
         // Zero transfers should work per ERC20 spec
         vm.prank(alice);
@@ -105,8 +102,7 @@ contract StrategySecurityTest is Test {
     // ============ Self Operations ============
 
     function testSelfTransferFees() public {
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
 
         uint256 balanceBefore = giga.balanceOf(alice);
 
@@ -124,13 +120,10 @@ contract StrategySecurityTest is Test {
 
     // ============ Insufficient Balance Tests ============
 
-    function testRedeemWithInsufficientContractNative() public {
+    function testRedeemWithInsufficientContractMega() public {
         // Mint tokens
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 10 ether);
 
         // Alice redeems all her tokens (9.9 not 9900)
         vm.prank(alice);
@@ -145,7 +138,7 @@ contract StrategySecurityTest is Test {
 
         // Verify contract is nearly empty
         assertTrue(
-            address(giga).balance < 1 ether,
+            giga.getMegaReserve() < 1 ether,
             "Contract should be nearly empty"
         );
     }
@@ -154,8 +147,7 @@ contract StrategySecurityTest is Test {
 
     function testMaxSupplyEnforcement() public {
         // Mint during minting period (100 MEGA = 100 GIGA total, alice gets 99 after 1% fee)
-        vm.prank(alice);
-        giga.mint{value: 100 ether}();
+        mintGiga(alice, 100 ether);
 
         // Fast forward past minting period
         vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
@@ -173,21 +165,22 @@ contract StrategySecurityTest is Test {
         // With proportional minting, we can mint up to ~0.99 GIGA
 
         // Small mint should succeed
-        vm.prank(bob);
-        giga.mint{value: 0.9 ether}(); // Should succeed
+        mega.mint(bob, 10 ether);
+        mintGiga(bob, 0.9 ether);
 
         // Try to mint again when we're close to max supply - should fail
-        vm.prank(bob);
+        vm.startPrank(bob);
+        mega.approve(address(giga), 0.1 ether);
         vm.expectRevert("Max supply reached");
-        giga.mint{value: 0.1 ether}(); // This would push us over max supply
+        giga.mint(0.1 ether); // This would push us over max supply
+        vm.stopPrank();
     }
 
     // ============ Timing Tests ============
 
     function testTimestampManipulationResistance() public {
         // The 25-hour pseudo-days make it harder to game timing
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         // Fast forward to just before day 2
         vm.warp(block.timestamp + 50 hours - 1);
@@ -205,11 +198,8 @@ contract StrategySecurityTest is Test {
     }
 
     function testPreventDoubleLotteryExecution() public {
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 5 ether);
 
         // Move past minting period
         vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
@@ -235,9 +225,8 @@ contract StrategySecurityTest is Test {
         // Test with large but reasonable amount
         uint256 largeAmount = 10_000 ether;
 
-        vm.deal(alice, largeAmount + 1 ether);
-        vm.prank(alice);
-        giga.mint{value: largeAmount}();
+        mega.mint(alice, largeAmount + 1 ether);
+        mintGiga(alice, largeAmount);
 
         // Check fee calculation didn't overflow
         uint256 expectedTokens = (largeAmount * 99) / 100; // 9,900 ether tokens (1:1 ratio after 1% fee)
@@ -264,11 +253,8 @@ contract StrategySecurityTest is Test {
         // We can't change beneficiaries array, but we can test the fallback behavior
         // When beneficiary rejects, prize should go to current winner
 
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 5 ether);
 
         // Generate some transfer fees on day 8
         vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
@@ -309,7 +295,7 @@ contract StrategySecurityTest is Test {
 
         // Get the first beneficiary address to track its balance
         address firstBeneficiary = giga.BENEFICIARIES(0);
-        uint256 beneficiaryBalanceBefore = firstBeneficiary.balance;
+        uint256 beneficiaryMegaBefore = mega.balanceOf(firstBeneficiary);
 
         // Fast forward 7 days to overwrite the slot with unclaimed prize
         // This will trigger the beneficiary funding
@@ -324,12 +310,11 @@ contract StrategySecurityTest is Test {
         }
 
         // Check if beneficiary received MEGA
-        uint256 beneficiaryBalanceAfter = firstBeneficiary.balance;
-        uint256 totalNativeSent = beneficiaryBalanceAfter -
-            beneficiaryBalanceBefore;
+        uint256 beneficiaryMegaAfter = mega.balanceOf(firstBeneficiary);
+        uint256 totalMegaSent = beneficiaryMegaAfter - beneficiaryMegaBefore;
 
         // CRITICAL: The beneficiary should receive MEGA equal to the backing value of the GIGA prize
-        // The correct conversion should be: megaAmount = (gigaAmount * contractNativeBalance) / totalSupply
+        // The correct conversion should be: megaAmount = (gigaAmount * contractMegaBalance) / totalSupply
 
         // During the 7-day loop, MULTIPLE unclaimed prizes may be sent to beneficiaries
         // The contract correctly converts each GIGA prize to MEGA using the backing ratio
@@ -337,7 +322,7 @@ contract StrategySecurityTest is Test {
 
         // Verify that MEGA was sent to beneficiary
         assertTrue(
-            totalNativeSent > 0,
+            totalMegaSent > 0,
             "Should have sent some MEGA to beneficiary"
         );
     }
@@ -349,13 +334,12 @@ contract StrategySecurityTest is Test {
         address[] memory users = new address[](20);
         for (uint256 i = 0; i < 20; i++) {
             users[i] = address(uint160(0x1000 + i));
-            vm.deal(users[i], 10 ether);
+            mega.mint(users[i], 10 ether);
         }
 
         // Mint for all users
         for (uint256 i = 0; i < 20; i++) {
-            vm.prank(users[i]);
-            giga.mint{value: 1 ether}();
+            mintGiga(users[i], 1 ether);
         }
 
         // Move past minting period to ensure fees go to pool

@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {StrategyTestBase, MockContract, ReentrancyAttacker, MockRejectNative} from "./helpers/StrategyTestBase.sol";
+import {StrategyTestBase, MockContract, ReentrancyAttacker, MockRejectNative, MockMEGA} from "./helpers/StrategyTestBase.sol";
 import {console} from "forge-std/Test.sol";
-import {IWMEGA} from "../src/Strategy.sol";
+import {Strategy} from "../src/Strategy.sol";
 
 contract StrategyCoreTest is StrategyTestBase {
     function testTransferWithFee() public {
         // Alice mints tokens
-        vm.expectEmit(true, false, false, true);
-        emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         // Verify initial balances
         uint256 aliceInitial = giga.balanceOf(alice);
@@ -53,13 +50,13 @@ contract StrategyCoreTest is StrategyTestBase {
     }
 
     function testRejectDirectNativeTransfer() public {
-        // The contract actually accepts MEGA via receive() for donations
-        // Let's test that MEGA can be sent but no tokens are minted
+        // The contract now rejects native ETH transfers
+        // It expects ERC20 MEGA instead
         uint256 initialSupply = giga.totalSupply();
 
         vm.prank(alice);
+        vm.expectRevert("Use mint() with ERC20 MEGA");
         (bool success, ) = address(giga).call{value: 1 ether}("");
-        assertTrue(success, "Native transfer should succeed");
 
         // No tokens should be minted
         assertEq(
@@ -71,279 +68,16 @@ contract StrategyCoreTest is StrategyTestBase {
     }
 
     function testReentrancyGuardWorks() public {
-        ReentrancyAttacker attacker = new ReentrancyAttacker(giga);
-        vm.deal(address(attacker), 10 ether);
+        ReentrancyAttacker attacker = new ReentrancyAttacker(giga, mega);
+        mega.mint(address(attacker), 10 ether);
 
         // Attacker tries to reenter during mint
-        attacker.attack{value: 2 ether}();
+        vm.prank(address(attacker));
+        attacker.attack(2 ether);
 
         // Check that only one mint succeeded
         uint256 attackerBalance = giga.balanceOf(address(attacker));
         assertEq(attackerBalance, 1.98 ether); // Only one mint: 2 MEGA * 0.99 (after 1% fee)
-    }
-
-    function testBeneficiariesReceiveLessNativeDueToWrappedWithdrawalTiming() public {
-        // KNOWN BUG DOCUMENTATION:
-        // This test documents a timing issue where WMEGA is withdrawn AFTER beneficiary calculations
-        // in _finalizeAuction(), causing beneficiaries to receive less MEGA than they should.
-        // The bug is complex to reliably reproduce in tests, so this test just documents it.
-
-        // Setup initial state
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-        vm.prank(bob);
-        giga.mint{value: 10 ether}();
-
-        // Move past minting period
-        skipPastMintingPeriod();
-
-        // Generate fees for first auction
-        vm.prank(alice);
-        giga.transfer(bob, 1 ether);
-
-        // Start first auction
-        vm.warp(block.timestamp + 25 hours + 61);
-        giga.executeLottery();
-
-        // Get auction details
-        uint256 slot1;
-        {
-            (, , , uint112 amount, uint32 auctionDay1) = giga
-                .currentAuction();
-            require(amount > 0, "Should have active auction");
-            slot1 = auctionDay1 % 7;
-        }
-
-        // Place wrapped native bid
-        IWMEGA wmegaToken = IWMEGA(address(giga.wmega()));
-        uint256 bidAmount1 = 1 ether;
-        vm.deal(charlie, bidAmount1);
-        vm.startPrank(charlie);
-        wmega.deposit{value: bidAmount1}();
-        wmega.approve(address(giga), bidAmount1);
-        giga.bid(bidAmount1);
-        vm.stopPrank();
-
-        // Finalize auction - stores as unclaimed prize
-        vm.warp(block.timestamp + 25 hours + 61);
-        giga.executeLottery();
-
-        // Verify unclaimed prize stored
-        {
-            (address winner1, ) = giga.auctionUnclaimedPrizes(slot1);
-            require(winner1 == charlie, "Charlie should win");
-            // Prize amount will be verified when we need it later
-        }
-
-        // Run cycles to find auction with same slot
-        // We need to cycle through until we find an auction that will overwrite slot1
-        for (uint i = 0; i < 7; i++) {
-            vm.prank(alice);
-            giga.transfer(bob, 0.1 ether);
-            vm.warp(block.timestamp + 25 hours + 61);
-            giga.executeLottery();
-
-            // Check if we're at an auction day with matching slot
-            (, , , uint112 currentAmount, uint32 currentDay) = giga
-                .currentAuction();
-
-            // Check if this is an auction (not lottery) with the same slot
-            if (currentAmount > 0 && currentDay % 7 == slot1) {
-                // Found matching auction - place wrapped native bid
-                uint256 bidAmount2 = 0.5 ether;
-                vm.deal(david, bidAmount2);
-                vm.startPrank(david);
-                wmega.deposit{value: bidAmount2}();
-                wmega.approve(address(giga), bidAmount2);
-                giga.bid(bidAmount2);
-                vm.stopPrank();
-
-                // Get the beneficiary address and make it able to receive MEGA
-                address beneficiary = giga.BENEFICIARIES(0);
-                uint256 beneficiaryBefore = beneficiary.balance;
-
-                // Get balances BEFORE finalization
-                uint256 nativeBalance = address(giga).balance;
-                uint256 wmegaBalance = wmega.balanceOf(address(giga));
-                uint256 totalSupply = giga.totalSupply();
-
-                // Calculate expected amount for auction's beneficiary payment
-                // IMPORTANT: The auction calculates BEFORE withdrawing WMEGA!
-                // The execution order in _finalizeAuction is:
-                // 1. Calculate MEGA to send using current balance (line 1108)
-                // 2. Send MEGA to beneficiary (line 1111)
-                // 3. WMEGA.withdraw() happens AFTER (line 1124)
-                //
-                // So the auction does NOT include WMEGA in its calculation!
-                uint256 expectedAmount;
-                {
-                    // Get the auction prize that will be sent to beneficiary
-                    (, uint112 auctionPrize) = giga.auctionUnclaimedPrizes(
-                        slot1
-                    );
-
-                    // Check if there's an unclaimed lottery prize that will be sent first
-                    uint256 lotterySlot = (giga.getCurrentDay() - 1) % 7;
-                    (, uint112 lotteryPrize) = giga.lotteryUnclaimedPrizes(
-                        lotterySlot
-                    );
-
-                    uint256 balanceForAuctionCalc = nativeBalance;
-                    uint256 supplyForAuctionCalc = totalSupply;
-
-                    // Account for lottery's beneficiary payment and burn
-                    if (lotteryPrize > 0) {
-                        uint256 lotteryPayment = (uint256(lotteryPrize) *
-                            nativeBalance) / totalSupply;
-                        balanceForAuctionCalc -= lotteryPayment;
-                        supplyForAuctionCalc -= lotteryPrize;
-                    }
-
-                    // The auction calculation does NOT include WMEGA (it's withdrawn after)
-                    expectedAmount =
-                        (uint256(auctionPrize) * balanceForAuctionCalc) /
-                        supplyForAuctionCalc;
-
-                }
-
-                // Finalize auction
-                vm.warp(block.timestamp + 25 hours + 61);
-                giga.executeLottery();
-
-                // Bug is documented - skip complex verification
-                assertTrue(true, "WMEGA timing bug documented (see testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries)");
-                return;
-            }
-        }
-
-        revert("Failed to set up test conditions");
-    }
-
-    function testBeneficiariesReceiveLessNativeDueToWrappedTiming() public {
-        // This test FAILS to show that beneficiaries receive LESS MEGA than they should
-        // because WMEGA is withdrawn AFTER the beneficiary calculation
-
-        // Setup: Create a simple scenario with one auction
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-        vm.prank(bob);
-        giga.mint{value: 10 ether}();
-
-        // Move past minting period
-        skipPastMintingPeriod();
-
-        // Generate fees and create first auction
-        vm.prank(alice);
-        giga.transfer(bob, 1 ether); // 10 GIGA fee
-
-        // Execute to start auction (day 9)
-        vm.warp(block.timestamp + 25 hours + 61);
-        giga.executeLottery();
-
-        // Get current auction details
-        (, , uint96 minBid, uint112 auctionAmount, uint32 auctionDay) = giga
-            .currentAuction();
-        uint256 slot = auctionDay % 7;
-
-        // Place wrapped native bid
-        IWMEGA wmegaToken = IWMEGA(address(giga.wmega()));
-        uint256 bidAmount = minBid > 0 ? uint256(minBid) : 0.1 ether;
-        vm.deal(charlie, bidAmount);
-        vm.startPrank(charlie);
-        wmega.deposit{value: bidAmount}();
-        wmega.approve(address(giga), bidAmount);
-        giga.bid(bidAmount);
-        vm.stopPrank();
-
-        // Finalize auction (day 10)
-        vm.warp(block.timestamp + 25 hours + 61);
-        giga.executeLottery();
-
-        // Verify auction prize was stored
-        (address winner, uint112 prizeStored) = giga.auctionUnclaimedPrizes(
-            slot
-        );
-        assertEq(winner, charlie, "Charlie should be winner");
-        assertEq(prizeStored, auctionAmount, "Prize amount should match");
-
-        // We need to find the next auction that maps to the same slot
-        // Keep executing until we find an auction with the same slot
-        bool foundMatchingAuction = false;
-        uint256 attempts = 0;
-
-        while (!foundMatchingAuction && attempts < 20) {
-            // Generate fees
-            vm.prank(alice);
-            giga.transfer(bob, 0.1 ether);
-
-            vm.warp(block.timestamp + 25 hours + 61);
-            giga.executeLottery();
-
-            // Check if we have an auction with matching slot
-            (
-                ,
-                ,
-                uint96 newMinBid,
-                uint112 newAuctionAmount,
-                uint32 newAuctionDay
-            ) = giga.currentAuction();
-            if (newAuctionAmount > 0 && newAuctionDay % 7 == slot) {
-                // Place wrapped native bid
-                uint256 newBidAmount = newMinBid > 0
-                    ? uint256(newMinBid)
-                    : 1 ether;
-                vm.deal(david, newBidAmount);
-                vm.startPrank(david);
-                wmega.deposit{value: newBidAmount}();
-                wmega.approve(address(giga), newBidAmount);
-                giga.bid(newBidAmount);
-                vm.stopPrank();
-
-                foundMatchingAuction = true;
-            }
-            attempts++;
-        }
-
-        require(foundMatchingAuction, "Could not find matching auction slot");
-
-        // Capture state BEFORE finalization
-        address beneficiary = giga.BENEFICIARIES(0);
-        uint256 beneficiaryBalanceBefore = beneficiary.balance;
-        uint256 contractNativeBalance = address(giga).balance;
-        uint256 contractWMEGABalance = wmega.balanceOf(address(giga));
-        uint256 totalSupply = giga.totalSupply();
-
-        // Calculate what SHOULD be sent if WMEGA was included
-        uint256 expectedIfWMEGAIncluded = (uint256(prizeStored) *
-            (contractNativeBalance + contractWMEGABalance)) / totalSupply;
-
-        // Finalize - this SHOULD send old prize to beneficiary
-        vm.warp(block.timestamp + 25 hours + 61);
-        giga.executeLottery();
-
-        // Bug is documented - test setup is complex and hard to reliably trigger the exact condition
-        // See testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries for bug documentation
-        assertTrue(true, "WMEGA timing bug documented");
-    }
-
-    function testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries() public {
-        // This test would degigaate that WMEGA withdrawal timing affects beneficiaries
-        // However, the test is complex due to the auction/lottery alternation pattern
-        // and the 7-day cycle for unclaimed prizes
-
-        // The key issue: In _finalizeAuction(), the order is:
-        // 1. Calculate nativeToSend = (prize.amount * address(this).balance) / totalSupply()
-        // 2. Send MEGA to beneficiaries
-        // 3. WMEGA.withdraw(currentAuction.currentBid) - happens AFTER
-
-        // This means beneficiary calculations use a lower MEGA balance (without WMEGA)
-        // resulting in less MEGA sent to beneficiaries than they deserve
-
-        // Marking test as pending - the issue is confirmed in the code review
-        assertTrue(
-            true,
-            "WMEGA timing issue identified - beneficiaries get less MEGA"
-        );
     }
 
     function testNativeSentToBeneficiariesNotTokens() public {
@@ -514,10 +248,10 @@ contract StrategyCoreTest is StrategyTestBase {
         if (winner1 != address(0)) {
             // Track the first beneficiary's balance
             address firstBeneficiary = giga.BENEFICIARIES(0);
-            uint256 beneficiaryBalanceBefore = firstBeneficiary.balance;
+            uint256 beneficiaryMegaBefore = mega.balanceOf(firstBeneficiary);
 
             // Capture contract state BEFORE the 7-day wait (before beneficiary transfer)
-            uint256 contractBalanceBefore = address(giga).balance;
+            uint256 contractMegaBefore = giga.getMegaReserve();
             uint256 totalSupplyBefore = giga.totalSupply();
 
             // Wait 7 days to trigger unclaimed prize distribution
@@ -532,18 +266,17 @@ contract StrategyCoreTest is StrategyTestBase {
             }
 
             // Now check if beneficiary received the correct MEGA amount
-            uint256 beneficiaryBalanceAfter = firstBeneficiary.balance;
+            uint256 beneficiaryMegaAfter = mega.balanceOf(firstBeneficiary);
 
-            // Calculate expected native based on token to native conversion
-            // Should use the contract balance at time of transfer (after WMEGA withdrawal if any)
-            uint256 expectedNative = (prizeAmount1 * contractBalanceBefore) /
+            // Calculate expected MEGA based on token to MEGA conversion
+            uint256 expectedMega = (prizeAmount1 * contractMegaBefore) /
                 totalSupplyBefore;
 
             assertApproxEqAbs(
-                beneficiaryBalanceAfter - beneficiaryBalanceBefore,
-                expectedNative,
+                beneficiaryMegaAfter - beneficiaryMegaBefore,
+                expectedMega,
                 1, // Allow 1 wei difference for rounding
-                "Beneficiary should receive native token based on proper token/native conversion"
+                "Beneficiary should receive MEGA based on proper token/MEGA conversion"
             );
         }
     }
@@ -579,11 +312,8 @@ contract StrategyCoreTest is StrategyTestBase {
         );
     }
 
-    function testWrappedNativeWithdrawalInAuction() public {
-        // This test verifies wrapped native handling in auctions
-        // The actual wrapped native functionality is tested in StrategyAuction.t.sol
-        // Here we just verify the contract can handle wrapped native
-
+    function testAuctionWithMEGABids() public {
+        // This test verifies MEGA bidding in auctions
         setupBasicHolders();
 
         // Move past minting period
@@ -608,8 +338,9 @@ contract StrategyCoreTest is StrategyTestBase {
         // This maintains the invariant: LOT_POOL balance == auction amount + unclaimed prizes
 
         // First mint to the test contract itself to have balance
-        vm.deal(address(this), 10 ether);
-        giga.mint{value: 10 ether}();
+        mega.mint(address(this), 10 ether);
+        mega.approve(address(giga), 10 ether);
+        giga.mint(10 ether);
 
         uint256 testContractBalance = giga.balanceOf(address(this));
         assertEq(
@@ -665,11 +396,6 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // LOT_POOL should have received funds from the internal transfer
         // Either from lottery prize or auction amount
-        // During minting period, fees are much higher (170 tokens from setupBasicHolders)
-        // Plus the 10 tokens from the transfer = 180 tokens total fees
-        // After minting period, 50% goes to lottery/auction = 90 tokens
-        // However, initial balance includes fees from minting period
-        // The LOT_POOL balance change depends on the execution path
         // Just verify the system executed without reverting
         assertTrue(true, "Lottery/auction executed successfully");
     }
@@ -686,12 +412,15 @@ contract StrategyCoreTest is StrategyTestBase {
         // Create users and mint
         for (uint256 i = 0; i < numUsers; i++) {
             address user = address(uint160(0x1000 + i));
-            vm.deal(user, 10 ether);
 
             uint256 mintAmount = ((uint256(keccak256(abi.encode(seed, i))) %
                 5) + 1) * 1 ether;
-            vm.prank(user);
-            giga.mint{value: mintAmount}();
+
+            mega.mint(user, mintAmount);
+            vm.startPrank(user);
+            mega.approve(address(giga), mintAmount);
+            giga.mint(mintAmount);
+            vm.stopPrank();
         }
 
         // Perform random transfers

@@ -2,22 +2,15 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {Strategy} from "../src/Strategy.sol";
 
-// Mock WMEGA for testing
-contract MockWMEGA {
+// Mock ERC20 MEGA for testing
+contract MockMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    function deposit() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
-
-    function withdraw(uint256 amount) external {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MEGA transfer failed");
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -49,31 +42,34 @@ contract MockWMEGA {
 
         return true;
     }
-
-    receive() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
 }
 
 contract StrategySelfTransferTest is Test {
     Strategy public giga;
-    MockWMEGA public wmega;
+    MockMEGA public mega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
 
     function setUp() public {
-        wmega = new MockWMEGA();
-        giga = new Strategy(address(wmega));
+        mega = new MockMEGA();
+        giga = new Strategy(address(mega));
 
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
+        mega.mint(alice, 100 ether);
+        mega.mint(bob, 100 ether);
+    }
+
+    // Helper to mint GIGA tokens
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
     }
 
     function testSelfTransferFenwickConsistency() public {
         // Alice mints tokens
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         uint256 aliceBalanceBefore = giga.balanceOf(alice);
         uint256 fenwickBefore = giga.getSuffixSum(1);
@@ -108,11 +104,8 @@ contract StrategySelfTransferTest is Test {
 
     function testSelfTransferWithMultipleHolders() public {
         // Multiple users mint
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(alice, 10 ether);
+        mintGiga(bob, 5 ether);
 
         uint256 totalBefore = giga.balanceOf(alice) + giga.balanceOf(bob);
         uint256 fenwickBefore = giga.getSuffixSum(1);
@@ -141,8 +134,7 @@ contract StrategySelfTransferTest is Test {
     }
 
     function testRapidSelfTransfers() public {
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         uint256 expectedBalance = 9.9 ether;
 
@@ -166,8 +158,7 @@ contract StrategySelfTransferTest is Test {
 
     function testSyntheticAddressesNotInFenwick() public {
         // Verify that FEES_POOL and LOT_POOL are never tracked in Fenwick tree
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         // After minting, alice has 9900, FEES_POOL has 100
         uint256 aliceBalance = giga.balanceOf(alice);

@@ -7,19 +7,14 @@ import {console} from "forge-std/Test.sol";
 contract StrategyFenwickTest is StrategyTestBase {
     function testFenwickDebug() public {
         // Set up same scenario as probability test
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 1 ether}();
-
-        vm.prank(charlie);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
+        mintGiga(bob, 1 ether);
+        mintGiga(charlie, 1 ether);
 
         // Take snapshot
-        MockContract trigger = new MockContract();
-        vm.deal(address(trigger), 1 ether);
-        trigger.mintStrategy(giga);
+        MockContract trigger = new MockContract(mega);
+        mega.mint(address(trigger), 1 ether);
+        trigger.mintStrategy(giga, 1 ether);
 
         // Check what indices point to what
         console.log("Holder indices:");
@@ -63,14 +58,9 @@ contract StrategyFenwickTest is StrategyTestBase {
 
     function testFenwickTreeCumulativeSums() public {
         // Add holders with known balances
-        vm.prank(alice);
-        giga.mint{value: 1 ether}(); // 0.99 tokens
-
-        vm.prank(bob);
-        giga.mint{value: 2 ether}(); // 1.98 tokens
-
-        vm.prank(charlie);
-        giga.mint{value: 3 ether}(); // 2.97 tokens
+        mintGiga(alice, 1 ether); // 0.99 tokens
+        mintGiga(bob, 2 ether); // 1.98 tokens
+        mintGiga(charlie, 3 ether); // 2.97 tokens
 
         // getSuffixSum returns cumulative sum from index to end
         // So getSuffixSum(1) returns total of all holders
@@ -94,11 +84,8 @@ contract StrategyFenwickTest is StrategyTestBase {
 
     function testFenwickTreeConsistencyAfterOperations() public {
         // Initial setup
-        vm.prank(alice);
-        giga.mint{value: 5 ether}();
-
-        vm.prank(bob);
-        giga.mint{value: 3 ether}();
+        mintGiga(alice, 5 ether);
+        mintGiga(bob, 3 ether);
 
         // Perform various operations
         vm.prank(alice);
@@ -108,8 +95,7 @@ contract StrategyFenwickTest is StrategyTestBase {
         giga.transfer(charlie, 0.5 ether);
 
         // Add new holder
-        vm.prank(david);
-        giga.mint{value: 2 ether}();
+        mintGiga(david, 2 ether);
 
         // Check consistency - getSuffixSum(1) gets total from beginning
         uint256 totalFromFenwick = giga.getSuffixSum(1);
@@ -137,14 +123,12 @@ contract StrategyFenwickTest is StrategyTestBase {
         assertEq(giga.getHolderCount(), 0);
 
         // Alice becomes a holder
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
         assertEq(giga.getHolderCount(), 1);
         assertTrue(giga.isHolder(alice));
 
         // Bob becomes a holder
-        vm.prank(bob);
-        giga.mint{value: 1 ether}();
+        mintGiga(bob, 1 ether);
         assertEq(giga.getHolderCount(), 2);
         assertTrue(giga.isHolder(bob));
 
@@ -167,9 +151,11 @@ contract StrategyFenwickTest is StrategyTestBase {
 
         for (uint256 i = 0; i < numHolders; i++) {
             address holder = address(uint160(0x1000 + i));
-            vm.deal(holder, 1 ether);
-            vm.prank(holder);
-            giga.mint{value: 0.1 ether}();
+            mega.mint(holder, 1 ether);
+            vm.startPrank(holder);
+            mega.approve(address(giga), 0.1 ether);
+            giga.mint(0.1 ether);
+            vm.stopPrank();
         }
 
         assertEq(giga.getHolderCount(), numHolders);

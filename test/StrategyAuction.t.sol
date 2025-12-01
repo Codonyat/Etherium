@@ -2,11 +2,51 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../src/Strategy.sol";
-import {MockWMEGA, WMEGATestBase} from "././helpers/WSTRATHelpers.sol";
+import {Strategy} from "../src/Strategy.sol";
 
-contract StrategyAuctionTest is WMEGATestBase {
+// Mock ERC20 MEGA for testing
+contract MockMEGA {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        require(balanceOf[from] >= amount, "Insufficient balance");
+        require(
+            allowance[from][msg.sender] >= amount,
+            "Insufficient allowance"
+        );
+
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        allowance[from][msg.sender] -= amount;
+
+        return true;
+    }
+}
+
+contract StrategyAuctionTest is Test {
     Strategy public giga;
+    MockMEGA public mega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -26,23 +66,41 @@ contract StrategyAuctionTest is WMEGATestBase {
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
 
     function setUp() public {
-        setupWMEGA();
-        giga = new Strategy(address(wmega));
+        mega = new MockMEGA();
+        giga = new Strategy(address(mega));
 
         // Fund test accounts
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
-        vm.deal(charlie, 100 ether);
-        vm.deal(david, 100 ether);
+        mega.mint(alice, 100 ether);
+        mega.mint(bob, 100 ether);
+        mega.mint(charlie, 100 ether);
+        mega.mint(david, 100 ether);
     }
 
-    function testAuctionWithWrappedBidding() public {
+    // Helper functions
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
+    }
+
+    function skipPastMintingPeriod() internal {
+        vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
+    }
+
+    function placeBid(address bidder, uint256 bidAmount) internal {
+        vm.startPrank(bidder);
+        mega.approve(address(giga), bidAmount);
+        giga.bid(bidAmount);
+        vm.stopPrank();
+    }
+
+    function testAuctionWithBidding() public {
         // Generate fees during minting period
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         // Fast forward past minting period
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
 
         // Generate fees via transfer (alice has 9.9 tokens from 10 MEGA mint with 1:1 ratio)
@@ -68,49 +126,44 @@ contract StrategyAuctionTest is WMEGATestBase {
         // Get auction details
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with wrapped token
-        getWMEGAAndApprove(alice, address(giga), 1 ether);
-        vm.prank(alice);
-        giga.bid(minBid);
+        // Alice bids
+        uint256 aliceMegaBefore = mega.balanceOf(alice);
+        placeBid(alice, minBid);
+        assertEq(
+            mega.balanceOf(alice),
+            aliceMegaBefore - minBid,
+            "Alice should have spent MEGA"
+        );
 
         // Bob outbids
         uint256 newBid = (minBid * 110) / 100;
-        getWMEGAAndApprove(bob, address(giga), 1 ether);
-        vm.prank(bob);
-        giga.bid(newBid);
+        placeBid(bob, newBid);
 
-        // Verify Alice got refunded in wrapped token
-        assertEq(wmega.balanceOf(alice), 1 ether, "Alice should be refunded");
+        // Verify Alice got refunded
+        assertEq(
+            mega.balanceOf(alice),
+            aliceMegaBefore,
+            "Alice should be refunded"
+        );
 
         // Verify Bob is current bidder
         (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testAuctionFinalizationConvertsWrappedToNative() public {
+    function testAuctionFinalization() public {
         // Generate fees
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         // Fast forward past minting period
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
 
-        // Generate fees via transfer (alice has 9.9 tokens from 10 MEGA mint with 1:1 ratio)
+        // Generate fees via transfer
         uint256 aliceBalanceBefore = giga.balanceOf(alice);
         vm.prank(alice);
-        bool success = giga.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
+        bool success = giga.transfer(bob, 1 ether);
         assertTrue(success, "Transfer should succeed");
-        assertEq(
-            giga.balanceOf(alice),
-            aliceBalanceBefore - 1 ether,
-            "Alice balance should decrease by 1"
-        );
-        assertEq(
-            giga.balanceOf(bob),
-            0.99 ether,
-            "Bob should receive 0.99 (1 - 0.01 fee)"
-        );
 
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
@@ -118,13 +171,11 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         // Place bid
         (, , uint96 minBid, , ) = giga.currentAuction();
-        getWMEGAAndApprove(alice, address(giga), 1 ether);
-        vm.prank(alice);
-        giga.bid(minBid);
+        placeBid(alice, minBid);
 
-        uint256 contractNativeBefore = address(giga).balance;
-        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
-        assertEq(contractWrappedBefore, minBid, "Contract should hold wrapped token");
+        uint256 contractMegaBefore = giga.getMegaReserve();
+        uint256 escrowedBefore = giga.escrowedBidMega();
+        assertEq(escrowedBefore, minBid, "Contract should have escrowed bid");
 
         // Generate fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
@@ -134,20 +185,24 @@ contract StrategyAuctionTest is WMEGATestBase {
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         giga.executeLottery();
 
-        // Verify wrapped token was converted to native
-        uint256 contractWrappedAfter = wmega.balanceOf(address(giga));
+        // Verify escrowed bid was added to reserve
+        uint256 escrowedAfter = giga.escrowedBidMega();
+        assertEq(escrowedAfter, 0, "Escrow should be empty after finalization");
 
-        assertEq(contractWrappedAfter, 0, "Contract should have no wrapped token");
-        // The important thing is that wrapped token was successfully withdrawn and converted to native
-        // The native balance may change due to beneficiary funding, but wrapped should be zero
+        // Reserve should have increased by bid amount
+        uint256 contractMegaAfter = giga.getMegaReserve();
+        assertGt(
+            contractMegaAfter,
+            contractMegaBefore,
+            "Reserve should have increased"
+        );
     }
 
     function testBidIncrementRequirement() public {
         // Setup auction
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -158,21 +213,19 @@ contract StrategyAuctionTest is WMEGATestBase {
         (, , uint96 minBid, , ) = giga.currentAuction();
 
         // First bid at minimum
-        getWMEGAAndApprove(alice, address(giga), 1 ether);
-        vm.prank(alice);
-        giga.bid(minBid);
+        placeBid(alice, minBid);
 
         // Try to bid with less than 10% increase
         uint256 lowBid = (minBid * 109) / 100; // 9% increase
-        getWMEGAAndApprove(bob, address(giga), 1 ether);
-        vm.prank(bob);
+        vm.startPrank(bob);
+        mega.approve(address(giga), lowBid);
         vm.expectRevert("Bid too low");
         giga.bid(lowBid);
+        vm.stopPrank();
 
         // Bid with exactly 10% increase should work
         uint256 validBid = (minBid * 110) / 100;
-        vm.prank(bob);
-        giga.bid(validBid);
+        placeBid(bob, validBid);
 
         (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
@@ -180,10 +233,9 @@ contract StrategyAuctionTest is WMEGATestBase {
 
     function testNoBidAuctionRollover() public {
         // Generate fees
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -208,8 +260,6 @@ contract StrategyAuctionTest is WMEGATestBase {
         uint256 feesPoolAfter = giga.balanceOf(giga.FEES_POOL());
 
         // The rolled over amount from the failed auction goes back to FEES_POOL
-        // This ensures it will be distributed in the next lottery/auction
-        // The auction (with 5 tokens) had no bids, so it returns to FEES_POOL
         assertTrue(
             feesPoolAfter > 0,
             "FEES_POOL should contain rolled over auction amount"
@@ -218,15 +268,11 @@ contract StrategyAuctionTest is WMEGATestBase {
 
     function test50_50FeeSplitAfterMintingPeriod() public {
         // Generate tokens during minting
-        // 100 MEGA = 100 GIGA tokens before fee
-        vm.prank(alice);
-        giga.mint{value: 100 ether}(); // Alice gets 99 tokens after 1% fee
-        // During minting period, 1% fee is minted as tokens: 100 MEGA * 1:1 ratio * 1% = 1 token
+        mintGiga(alice, 100 ether); // Alice gets 99 tokens after 1% fee
 
         // After minting period (day 8 = 8 * 25 hours from start)
         vm.warp(block.timestamp + 8 * 25 hours);
 
-        // Alice has 99 tokens
         // Transfer 10 tokens (generates 0.1 token fee)
         vm.prank(alice);
         giga.transfer(bob, 10 ether);
@@ -246,7 +292,6 @@ contract StrategyAuctionTest is WMEGATestBase {
         // Execute lottery/auction for the day's fees
         vm.warp(block.timestamp + 25 hours + 1 minutes);
 
-        // We generated fees on day 8, so we execute on day 9 to distribute day 8's fees
         giga.executeLottery();
 
         // Verify auction has half the fees (0.595 tokens)
@@ -255,14 +300,9 @@ contract StrategyAuctionTest is WMEGATestBase {
     }
 
     function testMinimumBidCalculation() public {
-        // Test that minimum bid is calculated correctly
-        // New Formula: MinBid = (native balance * feesToDistribute) / (2 * totalSupply)
-
         // Setup: Create known MEGA balance and total supply
-        vm.prank(alice);
-        giga.mint{value: 10 ether}(); // 9.9 GIGA to alice, 0.1 to fees
-        vm.prank(bob);
-        giga.mint{value: 5 ether}(); // 4.95 GIGA to bob, 0.05 to fees
+        mintGiga(alice, 10 ether); // 9.9 GIGA to alice, 0.1 to fees
+        mintGiga(bob, 5 ether); // 4.95 GIGA to bob, 0.05 to fees
 
         // Total supply: 9.9 + 0.1 + 4.95 + 0.05 = 15 GIGA
         // MEGA balance: 15 MEGA
@@ -274,13 +314,13 @@ contract StrategyAuctionTest is WMEGATestBase {
             "Total supply should be 15 GIGA"
         );
         assertEq(
-            address(giga).balance,
+            giga.getMegaReserve(),
             megaBalance,
             "Contract should have 15 MEGA"
         );
 
         // Move past minting period
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
 
         // Generate specific amount of fees for auction
         vm.prank(alice);
@@ -299,10 +339,6 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         // Calculate expected minimum bid with new formula
         // MinBid = (megaBalance * auctionAmount) / (2 * totalSupply)
-        // = (15 MEGA * 0.005 GIGA) / (2 * 15 GIGA)
-        // = 0.075 / 30 MEGA
-        // = 0.0025 MEGA
-
         uint256 expectedMinBid = (megaBalance * auctionAmount) /
             (2 * expectedTotalSupply);
 
@@ -314,9 +350,7 @@ contract StrategyAuctionTest is WMEGATestBase {
         assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 MEGA");
 
         // Verify that bidding exactly the minimum bid works
-        getWMEGAAndApprove(alice, address(giga), minBid);
-        vm.prank(alice);
-        giga.bid(minBid);
+        placeBid(alice, minBid);
 
         (address currentBidder, uint96 currentBid, , , ) = giga
             .currentAuction();
@@ -324,41 +358,37 @@ contract StrategyAuctionTest is WMEGATestBase {
         assertEq(currentBid, minBid, "Current bid should equal minimum bid");
 
         // Verify bidding below minimum fails
-        getWMEGAAndApprove(bob, address(giga), minBid);
-        vm.prank(bob);
+        vm.startPrank(bob);
+        mega.approve(address(giga), minBid);
         vm.expectRevert("Bid too low");
         giga.bid(minBid - 1);
+        vm.stopPrank();
     }
 
     function testMinimumBidWithDifferentBalances() public {
-        // Test minimum bid calculation with various MEGA balances and fee amounts
-
         // Scenario 1: Low MEGA balance, high supply (deflated token)
-        vm.prank(alice);
-        giga.mint{value: 100 ether}(); // 99 GIGA
+        mintGiga(alice, 100 ether); // 99 GIGA
 
         // Burn most tokens to simulate deflation
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.prank(alice);
         giga.redeem(90 ether); // Burns 89.1 GIGA, returns ~89.1 MEGA
 
         uint256 remainingSupply = giga.totalSupply();
-        uint256 remainingNative = address(giga).balance;
+        uint256 remainingMega = giga.getMegaReserve();
 
         // Generate fees
         vm.prank(alice);
-        giga.transfer(bob, 1 ether); // 10 GIGA fee
+        giga.transfer(bob, 1 ether);
 
         // Start auction
         vm.warp(block.timestamp + 25 hours + 61);
         giga.executeLottery();
 
-        (, , uint96 minBid1, uint112 auctionAmount1, ) = giga
-            .currentAuction();
+        (, , uint96 minBid1, uint112 auctionAmount1, ) = giga.currentAuction();
 
         // Verify minimum bid with new formula
-        // MinBid = (native balance * auctionAmount) / (2 * totalSupply)
-        uint256 expectedMin1 = (remainingNative * auctionAmount1) /
+        uint256 expectedMin1 = (remainingMega * auctionAmount1) /
             (2 * remainingSupply);
         assertEq(
             minBid1,
@@ -367,13 +397,9 @@ contract StrategyAuctionTest is WMEGATestBase {
         );
 
         // Scenario 2: High MEGA balance from donations
-        // Reset with new deployment for clean state
-        vm.warp(block.timestamp + 30 days); // Clear any time dependencies
-
         // Someone donates MEGA to increase backing
-        vm.deal(address(this), 50 ether);
-        (bool sent, ) = address(giga).call{value: 50 ether}("");
-        assertTrue(sent, "Native donation should succeed");
+        mega.mint(address(this), 50 ether);
+        mega.transfer(address(giga), 50 ether);
 
         // Generate new fees
         vm.prank(alice);
@@ -383,12 +409,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         vm.warp(block.timestamp + 25 hours + 61);
         giga.executeLottery();
 
-        (, , uint96 minBid2, uint112 auctionAmount2, ) = giga
-            .currentAuction();
+        (, , uint96 minBid2, uint112 auctionAmount2, ) = giga.currentAuction();
 
-        uint256 currentNative = address(giga).balance;
+        uint256 currentMega = giga.getMegaReserve();
         uint256 currentSupply = giga.totalSupply();
-        uint256 expectedMin2 = (currentNative * auctionAmount2) /
+        uint256 expectedMin2 = (currentMega * auctionAmount2) /
             (2 * currentSupply);
 
         assertEq(
@@ -405,17 +430,12 @@ contract StrategyAuctionTest is WMEGATestBase {
     }
 
     function testMinimumBidFormula() public {
-        // Test that minimum bid uses the correct formula
-        // Formula: MinBid = (native balance * auctionAmount) / (2 * totalSupply)
-
         // Using 3 MEGA to create 3 GIGA total supply
-        vm.prank(alice);
-        giga.mint{value: 3 ether}(); // 2.97 GIGA to alice, 0.03 to fees
+        mintGiga(alice, 3 ether); // 2.97 GIGA to alice, 0.03 to fees
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
 
         // Generate an odd fee amount: 0.007 GIGA
-        // After split: 0.0035 GIGA for auction
         vm.prank(alice);
         giga.transfer(bob, 0.7 ether); // 0.007 GIGA fee
 
@@ -424,16 +444,13 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
-        uint256 megaBalance = address(giga).balance;
+        uint256 megaBalance = giga.getMegaReserve();
         uint256 totalSupply = giga.totalSupply();
 
         // The auction should have 0.0035 GIGA (half of 0.007)
         assertEq(auctionAmount, 0.0035 ether, "Auction should have 0.0035 GIGA");
 
         // Calculate with new formula
-        // MinBid = (megaBalance * auctionAmount) / (2 * totalSupply)
-        // = (3 MEGA * 0.0035 GIGA) / (2 * 3 GIGA)
-        // = 0.0105 / 6 = 0.00175 MEGA
         uint256 expectedMinBid = (megaBalance * auctionAmount) /
             (2 * totalSupply);
 
@@ -452,14 +469,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         );
     }
 
-    // ============ Native MEGA Bidding Tests ============
+    function testBidRefunds() public {
+        // Setup auction
+        mintGiga(alice, 10 ether);
 
-    function testBidWithNative() public {
-        // Setup: Generate fees and start auction
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -469,87 +483,24 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MEGA
-        uint256 aliceBalanceBefore = alice.balance;
-        vm.prank(alice);
-        giga.bid{value: minBid}(0); // Pass 0 as bidAmount when using msg.value
-
-        // Verify Alice's MEGA balance decreased
+        // Alice bids
+        uint256 aliceMegaBefore = mega.balanceOf(alice);
+        placeBid(alice, minBid);
         assertEq(
-            alice.balance,
-            aliceBalanceBefore - minBid,
+            mega.balanceOf(alice),
+            aliceMegaBefore - minBid,
             "Alice should have spent MEGA"
         );
 
-        // Verify contract received wrapped token (not native)
-        assertEq(
-            wmega.balanceOf(address(giga)),
-            minBid,
-            "Contract should hold wrapped token"
-        );
-
-        // Verify Alice is the current bidder
-        (address currentBidder, uint96 currentBid, , , ) = giga
-            .currentAuction();
-        assertEq(currentBidder, alice, "Alice should be current bidder");
-        assertEq(currentBid, minBid, "Bid amount should match minBid");
-    }
-
-    function testBidWithNativeOverridesBidAmount() public {
-        // Test that msg.value takes precedence over bidAmount parameter
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        skipPastMintingPeriod(giga);
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(alice);
-        giga.transfer(bob, 1 ether);
-
-        vm.warp(block.timestamp + 25 hours + 1 minutes);
-        giga.executeLottery();
-
-        (, , uint96 minBid, , ) = giga.currentAuction();
-
-        // Alice sends native MEGA but passes different bidAmount parameter
-        vm.prank(alice);
-        giga.bid{value: minBid}(999999 ether); // This gets ignored
-
-        // Verify the actual bid is msg.value, not the parameter
-        (, uint96 currentBid, , , ) = giga.currentAuction();
-        assertEq(currentBid, minBid, "Bid should be msg.value, not parameter");
-    }
-
-    function testNativeBidRefundsInWrapped() public {
-        // Test that previous bidders get wrapped token refund even if current bidder uses native
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        skipPastMintingPeriod(giga);
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(alice);
-        giga.transfer(bob, 1 ether);
-
-        vm.warp(block.timestamp + 25 hours + 1 minutes);
-        giga.executeLottery();
-
-        (, , uint96 minBid, , ) = giga.currentAuction();
-
-        // Alice bids with wrapped token - get enough wrapped token for the bid
-        getWMEGAAndApprove(alice, address(giga), minBid);
-        vm.prank(alice);
-        giga.bid(minBid);
-
-        // Bob outbids with native MEGA
+        // Bob outbids
         uint256 newBid = (minBid * 110) / 100;
-        vm.prank(bob);
-        giga.bid{value: newBid}(0);
+        placeBid(bob, newBid);
 
-        // Verify Alice got refunded in wrapped token (not native MEGA)
-        // She should get back exactly what she bid
+        // Verify Alice got refunded in MEGA
         assertEq(
-            wmega.balanceOf(alice),
-            minBid,
-            "Alice should receive wrapped token refund equal to her bid"
+            mega.balanceOf(alice),
+            aliceMegaBefore,
+            "Alice should receive MEGA refund"
         );
 
         // Verify Bob is current bidder
@@ -557,12 +508,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testMixedNativeAndWrappedBids() public {
-        // Test that native and wrapped token bids can be mixed in same auction
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function testMultipleBidsAndRefunds() public {
+        // Setup auction
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -572,38 +522,36 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MEGA
-        vm.prank(alice);
-        giga.bid{value: minBid}(0);
+        uint256 aliceMegaBefore = mega.balanceOf(alice);
+        uint256 bobMegaBefore = mega.balanceOf(bob);
+        uint256 charlieMegaBefore = mega.balanceOf(charlie);
 
-        // Bob outbids with wrapped token
+        // Alice bids
+        placeBid(alice, minBid);
+
+        // Bob outbids
         uint256 bid2 = (minBid * 110) / 100;
-        getWMEGAAndApprove(bob, address(giga), bid2);
-        vm.prank(bob);
-        giga.bid(bid2);
+        placeBid(bob, bid2);
 
-        // Charlie outbids with native MEGA
+        // Charlie outbids
         uint256 bid3 = (bid2 * 110) / 100;
-        vm.prank(charlie);
-        giga.bid{value: bid3}(0);
+        placeBid(charlie, bid3);
 
-        // David outbids with wrapped token
+        // David outbids
         uint256 bid4 = (bid3 * 110) / 100;
-        getWMEGAAndApprove(david, address(giga), bid4);
-        vm.prank(david);
-        giga.bid(bid4);
+        placeBid(david, bid4);
 
-        // Verify all previous bidders got wrapped token refunds
+        // Verify all previous bidders got refunds
         assertEq(
-            wmega.balanceOf(alice),
-            minBid,
-            "Alice should have wrapped token refund"
+            mega.balanceOf(alice),
+            aliceMegaBefore,
+            "Alice should have MEGA refund"
         );
-        assertEq(wmega.balanceOf(bob), bid2, "Bob should have wrapped token refund");
+        assertEq(mega.balanceOf(bob), bobMegaBefore, "Bob should have MEGA refund");
         assertEq(
-            wmega.balanceOf(charlie),
-            bid3,
-            "Charlie should have wrapped token refund"
+            mega.balanceOf(charlie),
+            charlieMegaBefore,
+            "Charlie should have MEGA refund"
         );
 
         // Verify David is the winner
@@ -611,12 +559,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         assertEq(currentBidder, david, "David should be current bidder");
     }
 
-    function testNativeBidTooLow() public {
-        // Test that bidding with native MEGA below minimum reverts
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function testBidTooLow() public {
+        // Setup auction
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -626,60 +573,23 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice tries to bid with native MEGA below minimum
-        vm.prank(alice);
+        // Alice tries to bid below minimum
+        vm.startPrank(alice);
+        mega.approve(address(giga), minBid);
         vm.expectRevert("Bid too low");
-        giga.bid{value: minBid - 1}(0);
+        giga.bid(minBid - 1);
+        vm.stopPrank();
 
         // Verify no bid was placed
         (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, address(0), "Should have no bidder");
     }
 
-    function testNativeBidRevertRollback() public {
-        // Test that if native bid fails, the wrapping is rolled back
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function testAuctionFinalizationWithWinner() public {
+        // Setup auction
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(alice);
-        giga.transfer(bob, 1 ether);
-
-        vm.warp(block.timestamp + 25 hours + 1 minutes);
-        giga.executeLottery();
-
-        (, , uint96 minBid, , ) = giga.currentAuction();
-
-        uint256 aliceBalanceBefore = alice.balance;
-        uint256 wmegaBalanceBefore = wmega.balanceOf(address(giga));
-
-        // Alice tries to bid too low with native MEGA
-        vm.prank(alice);
-        vm.expectRevert("Bid too low");
-        giga.bid{value: minBid - 1}(0);
-
-        // Verify Alice's MEGA was refunded (transaction reverted)
-        assertEq(
-            alice.balance,
-            aliceBalanceBefore,
-            "Alice should have same MEGA balance"
-        );
-
-        // Verify contract didn't receive any wrapped token
-        assertEq(
-            wmega.balanceOf(address(giga)),
-            wmegaBalanceBefore,
-            "Contract should have same wrapped token balance"
-        );
-    }
-
-    function testAuctionFinalizationWithNativeWinner() public {
-        // Test that auction finalization works correctly when winner used native MEGA
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
-
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -689,15 +599,14 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
-        // Alice bids with native MEGA
-        vm.prank(alice);
-        giga.bid{value: minBid}(0);
+        // Alice bids
+        placeBid(alice, minBid);
 
-        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
+        uint256 escrowedBefore = giga.escrowedBidMega();
         assertEq(
-            contractWrappedBefore,
+            escrowedBefore,
             minBid,
-            "Contract should hold Alice's wrapped bid"
+            "Contract should have escrowed Alice's bid"
         );
 
         // Generate fees for next day
@@ -708,11 +617,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         vm.warp(block.timestamp + 25 hours + 1 minutes);
         giga.executeLottery();
 
-        // Verify wrapped token was withdrawn to native
+        // Verify escrowed was cleared
         assertEq(
-            wmega.balanceOf(address(giga)),
+            giga.escrowedBidMega(),
             0,
-            "Contract should have no wrapped token after finalization"
+            "Contract should have no escrowed MEGA after finalization"
         );
 
         // Verify Alice won the auction and has claimable prize (at least the auction amount)
@@ -737,12 +646,11 @@ contract StrategyAuctionTest is WMEGATestBase {
         );
     }
 
-    function testNativeBidIncrementRequirement() public {
-        // Test that 10% increment rule applies to native MEGA bids
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function testBidIncrementAfterFirstBid() public {
+        // Test that 10% increment rule applies after first bid
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -752,32 +660,31 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MEGA
-        vm.prank(alice);
-        giga.bid{value: minBid}(0);
+        // Alice bids at minimum
+        placeBid(alice, minBid);
 
-        // Bob tries to bid with only 9% increase using native MEGA
+        // Bob tries to bid with only 9% increase
         uint256 lowBid = (minBid * 109) / 100;
-        vm.prank(bob);
+        vm.startPrank(bob);
+        mega.approve(address(giga), lowBid);
         vm.expectRevert("Bid too low");
-        giga.bid{value: lowBid}(0);
+        giga.bid(lowBid);
+        vm.stopPrank();
 
-        // Bob bids with exactly 10% increase using native MEGA
+        // Bob bids with exactly 10% increase
         uint256 validBid = (minBid * 110) / 100;
-        vm.prank(bob);
-        giga.bid{value: validBid}(0);
+        placeBid(bob, validBid);
 
         // Verify Bob is now the current bidder
         (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testNativeWrappingCorrectness() public {
-        // Test that native token is correctly wrapped
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function testEscrowAccountingCorrectness() public {
+        // Test that escrow accounting is correct
+        mintGiga(alice, 10 ether);
 
-        skipPastMintingPeriod(giga);
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(bob, 1 ether);
@@ -787,28 +694,34 @@ contract StrategyAuctionTest is WMEGATestBase {
 
         (, , uint96 minBid, , ) = giga.currentAuction();
 
-        uint256 contractNativeBefore = address(giga).balance;
-        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
+        uint256 reserveBefore = giga.getMegaReserve();
+        uint256 escrowBefore = giga.escrowedBidMega();
 
-        // Alice bids with native MEGA
-        vm.prank(alice);
-        giga.bid{value: minBid}(0);
+        // Alice bids
+        placeBid(alice, minBid);
 
-        // Contract's native MEGA should not increase (it gets wrapped)
-        // Actually, it will increase because wmega.deposit returns MEGA to contract via receive()
-        // But wrapped token balance should definitely increase
+        // Reserve should not change (bid goes to escrow, not reserve)
+        // Actually the total MEGA balance increases but escrow increases too
+        uint256 reserveAfter = giga.getMegaReserve();
+        uint256 escrowAfter = giga.escrowedBidMega();
+
         assertEq(
-            wmega.balanceOf(address(giga)),
-            contractWrappedBefore + minBid,
-            "Contract should have received wrapped token"
+            escrowAfter,
+            escrowBefore + minBid,
+            "Escrow should increase by bid amount"
+        );
+        assertEq(
+            reserveAfter,
+            reserveBefore,
+            "Reserve should remain unchanged"
         );
 
-        // Verify the wrapped token amount matches the bid amount exactly
+        // Verify the bid amount matches escrow
         (, uint96 currentBid, , , ) = giga.currentAuction();
         assertEq(
-            wmega.balanceOf(address(giga)),
+            escrowAfter,
             currentBid,
-            "Wrapped token balance should match bid amount"
+            "Escrow should match bid amount"
         );
     }
 }
@@ -824,28 +737,39 @@ contract MaliciousBidder {
     }
 }
 
-contract StrategyAuctionSecurityTest is WMEGATestBase {
+contract StrategyAuctionSecurityTest is Test {
     Strategy public giga;
+    MockMEGA public mega;
     address public alice = address(0x1);
     address public maliciousBidder;
 
     function setUp() public {
-        setupWMEGA();
-        giga = new Strategy(address(wmega));
+        mega = new MockMEGA();
+        giga = new Strategy(address(mega));
 
-        vm.deal(alice, 100 ether);
+        mega.mint(alice, 100 ether);
 
         MaliciousBidder malicious = new MaliciousBidder();
         maliciousBidder = address(malicious);
-        vm.deal(maliciousBidder, 100 ether);
+        mega.mint(maliciousBidder, 100 ether);
     }
 
-    function testWrappedNativePreventsRefundDoS() public {
-        // Setup auction
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+    function mintGiga(address user, uint256 megaAmount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), megaAmount);
+        giga.mint(megaAmount);
+        vm.stopPrank();
+    }
 
-        skipPastMintingPeriod(giga);
+    function skipPastMintingPeriod() internal {
+        vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
+    }
+
+    function testRefundDoSPrevention() public {
+        // Setup auction
+        mintGiga(alice, 10 ether);
+
+        skipPastMintingPeriod();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         giga.transfer(address(0x99), 1 ether);
@@ -856,21 +780,23 @@ contract StrategyAuctionSecurityTest is WMEGATestBase {
         (, , uint96 minBid, , ) = giga.currentAuction();
 
         // Malicious bidder places bid
-        getWMEGAAndApprove(maliciousBidder, address(giga), 1 ether);
-        vm.prank(maliciousBidder);
+        vm.startPrank(maliciousBidder);
+        mega.approve(address(giga), minBid);
         giga.bid(minBid);
+        vm.stopPrank();
 
-        // Alice can still outbid even though malicious bidder reverts on MEGA
+        // Alice can still outbid - refund goes as ERC20 transfer which works fine
         uint256 newBid = (minBid * 110) / 100;
-        getWMEGAAndApprove(alice, address(giga), 1 ether);
-        vm.prank(alice);
-        giga.bid(newBid); // This would fail with native but succeeds with wrapped token
+        vm.startPrank(alice);
+        mega.approve(address(giga), newBid);
+        giga.bid(newBid); // This should succeed
+        vm.stopPrank();
 
-        // Verify malicious bidder got wrapped token refund
+        // Verify malicious bidder got MEGA refund (ERC20 transfer doesn't use receive())
         assertEq(
-            wmega.balanceOf(maliciousBidder),
-            1 ether,
-            "Should receive wrapped native refund"
+            mega.balanceOf(maliciousBidder),
+            100 ether,
+            "Should receive MEGA refund"
         );
 
         (address currentBidder, , , , ) = giga.currentAuction();

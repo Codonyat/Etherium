@@ -2,22 +2,17 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {Strategy} from "../src/Strategy.sol";
 
-// Mock WMEGA for this standalone test
-contract MockWMEGALocal {
+// Mock MEGA ERC20 for this standalone test
+contract MockMEGALocal {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+    uint256 public totalSupply;
 
-    function deposit() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
-
-    function withdraw(uint256 amount) external {
-        require(balanceOf[msg.sender] >= amount, "Insufficient balance");
-        balanceOf[msg.sender] -= amount;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MEGA transfer failed");
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -49,15 +44,11 @@ contract MockWMEGALocal {
 
         return true;
     }
-
-    receive() external payable {
-        balanceOf[msg.sender] += msg.value;
-    }
 }
 
 contract StrategyAtomicityTest is Test {
     Strategy public giga;
-    MockWMEGALocal public wmega;
+    MockMEGALocal public mega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -78,40 +69,40 @@ contract StrategyAtomicityTest is Test {
     );
 
     function setUp() public {
-        wmega = new MockWMEGALocal();
-        giga = new Strategy(address(wmega));
+        mega = new MockMEGALocal();
+        giga = new Strategy(address(mega));
 
-        vm.deal(alice, 100 ether);
-        vm.deal(bob, 100 ether);
-        vm.deal(charlie, 100 ether);
+        // Fund accounts with MEGA tokens
+        mega.mint(alice, 100 ether);
+        mega.mint(bob, 100 ether);
+        mega.mint(charlie, 100 ether);
+    }
+
+    // Helper to approve and mint
+    function mintGiga(address user, uint256 amount) internal {
+        vm.startPrank(user);
+        mega.approve(address(giga), amount);
+        giga.mint(amount);
+        vm.stopPrank();
     }
 
     function testFenwickTreeAtomicityDuringTransfers() public {
         // Setup: Create holders with exact amounts
-        vm.expectEmit(true, true, true, true);
-        emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
         assertEq(
             giga.balanceOf(alice),
             9.9 ether,
             "Alice should have 9,900 tokens"
         );
 
-        vm.expectEmit(true, true, true, true);
-        emit Minted(bob, 5 ether, 4.95 ether, 0.05 ether);
-        vm.prank(bob);
-        giga.mint{value: 5 ether}();
+        mintGiga(bob, 5 ether);
         assertEq(
             giga.balanceOf(bob),
             4.95 ether,
             "Bob should have 4,950 tokens"
         );
 
-        vm.expectEmit(true, true, true, true);
-        emit Minted(charlie, 3 ether, 2.97 ether, 0.03 ether);
-        vm.prank(charlie);
-        giga.mint{value: 3 ether}();
+        mintGiga(charlie, 3 ether);
         assertEq(
             giga.balanceOf(charlie),
             2.97 ether,
@@ -170,10 +161,7 @@ contract StrategyAtomicityTest is Test {
 
     function testFenwickTreeAtomicityDuringMintAndBurn() public {
         // Initial mint
-        vm.expectEmit(true, true, true, true);
-        emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
         assertEq(
             giga.balanceOf(alice),
             9.9 ether,
@@ -216,22 +204,13 @@ contract StrategyAtomicityTest is Test {
         );
 
         // Add another holder - mint slightly more to meet minimum requirement
-        // After minting period, there's a minimum mint of 100 wei
-        // 0.0001 MEGA will mint ~0.1 tokens (proportional to backing ratio)
-        // But actually after redemption backing changed, need to calculate properly
-        // Contract has ~9.901 MEGA, total supply is 9900 tokens
-        // To mint 100 wei: need (100 * 9.901) / 9900e18 = ~1e-16 MEGA
-        // But that's too small, let's mint 0.0001 MEGA to get a reasonable amount
-        uint256 mintNative = 0.0001 ether;
-        uint256 expectedTokens = (mintNative * giga.totalSupply()) /
-            address(giga).balance;
+        uint256 mintAmount = 0.0001 ether;
+        uint256 expectedTokens = (mintAmount * giga.totalSupply()) /
+            giga.getMegaReserve();
         uint256 expectedFee = expectedTokens / 100;
         uint256 expectedNet = expectedTokens - expectedFee;
 
-        vm.expectEmit(true, true, true, true);
-        emit Minted(bob, mintNative, expectedNet, expectedFee);
-        vm.prank(bob);
-        giga.mint{value: mintNative}(); // Within capacity after redemption
+        mintGiga(bob, mintAmount);
         assertEq(
             giga.balanceOf(bob),
             expectedNet,
@@ -253,9 +232,11 @@ contract StrategyAtomicityTest is Test {
         address[10] memory users;
         for (uint256 i = 0; i < 10; i++) {
             users[i] = address(uint160(0x100 + i));
-            vm.deal(users[i], 10 ether);
-            vm.prank(users[i]);
-            giga.mint{value: 1 ether}();
+            mega.mint(users[i], 10 ether);
+            vm.startPrank(users[i]);
+            mega.approve(address(giga), 1 ether);
+            giga.mint(1 ether);
+            vm.stopPrank();
         }
 
         // Verify initial state
@@ -300,12 +281,11 @@ contract StrategyAtomicityTest is Test {
         // the Fenwick tree remains consistent due to atomic updates
 
         // Create a malicious contract that tries to reenter
-        MaliciousReentrant malicious = new MaliciousReentrant(giga);
-        vm.deal(address(malicious), 10 ether);
+        MaliciousReentrant malicious = new MaliciousReentrant(giga, mega);
+        mega.mint(address(malicious), 10 ether);
 
         // Initial state
-        vm.prank(alice);
-        giga.mint{value: 10 ether}();
+        mintGiga(alice, 10 ether);
 
         uint256 initialFenwick = giga.getSuffixSum(1);
         assertEq(
@@ -360,8 +340,7 @@ contract StrategyAtomicityTest is Test {
         // Test that Fenwick tree correctly handles accounts going to/from zero balance
 
         // Alice mints
-        vm.prank(alice);
-        giga.mint{value: 1 ether}();
+        mintGiga(alice, 1 ether);
 
         uint256 aliceBalance = giga.balanceOf(alice);
         uint256 fenwick1 = giga.getSuffixSum(1);
@@ -380,8 +359,7 @@ contract StrategyAtomicityTest is Test {
         );
 
         // Alice mints again (goes from 0 to positive)
-        vm.prank(alice);
-        giga.mint{value: 2 ether}();
+        mintGiga(alice, 2 ether);
 
         // Both should be tracked now
         uint256 fenwick3 = giga.getSuffixSum(1);
@@ -393,10 +371,12 @@ contract StrategyAtomicityTest is Test {
 // Helper contract for reentrancy test
 contract MaliciousReentrant {
     Strategy public giga;
+    MockMEGALocal public mega;
     bool public attacked = false;
 
-    constructor(Strategy _giga) {
+    constructor(Strategy _giga, MockMEGALocal _mega) {
         giga = _giga;
+        mega = _mega;
     }
 
     // Try to reenter when receiving tokens
@@ -404,7 +384,8 @@ contract MaliciousReentrant {
         if (!attacked) {
             attacked = true;
             // Try to mint during a transfer (should fail due to reentrancy guard)
-            try giga.mint{value: 1 ether}() {
+            mega.approve(address(giga), 1 ether);
+            try giga.mint(1 ether) {
                 // Should not reach here
             } catch {
                 // Expected to fail
