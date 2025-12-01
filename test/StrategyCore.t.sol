@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {StrategyTestBase, MockContract, ReentrancyAttacker, MockRejectETH} from "./helpers/StrategyTestBase.sol";
+import {StrategyTestBase, MockContract, ReentrancyAttacker, MockRejectNative} from "./helpers/StrategyTestBase.sol";
 import {console} from "forge-std/Test.sol";
-import {IWMON} from "../src/Strategy.sol";
+import {IWMEGA} from "../src/Strategy.sol";
 
 contract StrategyCoreTest is StrategyTestBase {
     function testTransferWithFee() public {
@@ -11,19 +11,19 @@ contract StrategyCoreTest is StrategyTestBase {
         vm.expectEmit(true, false, false, true);
         emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Verify initial balances
-        uint256 aliceInitial = monstr.balanceOf(alice);
+        uint256 aliceInitial = giga.balanceOf(alice);
         assertEq(
             aliceInitial,
             9.9 ether,
-            "Alice should have 9900 MONSTR after minting"
+            "Alice should have 9900 GIGA after minting"
         );
         assertEq(
-            monstr.balanceOf(monstr.FEES_POOL()),
+            giga.balanceOf(giga.FEES_POOL()),
             0.1 ether,
-            "Fees pool should have 0.1 MONSTR from mint"
+            "Fees pool should have 0.1 GIGA from mint"
         );
 
         uint256 transferAmount = 1 ether;
@@ -32,105 +32,105 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // Transfer with fee verification
         vm.prank(alice);
-        bool success = monstr.transfer(bob, transferAmount);
+        bool success = giga.transfer(bob, transferAmount);
         assertTrue(success, "Transfer should succeed");
 
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceInitial - transferAmount,
             "Alice balance should decrease by transfer amount"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             expectedReceived,
             "Bob should receive amount minus fee"
         );
         assertEq(
-            monstr.balanceOf(monstr.FEES_POOL()),
+            giga.balanceOf(giga.FEES_POOL()),
             0.1 ether + expectedFee,
             "Fees pool should increase by transfer fee"
         );
     }
 
-    function testRejectDirectETHTransfer() public {
-        // The contract actually accepts MON via receive() for donations
-        // Let's test that MON can be sent but no tokens are minted
-        uint256 initialSupply = monstr.totalSupply();
+    function testRejectDirectNativeTransfer() public {
+        // The contract actually accepts MEGA via receive() for donations
+        // Let's test that MEGA can be sent but no tokens are minted
+        uint256 initialSupply = giga.totalSupply();
 
         vm.prank(alice);
-        (bool success, ) = address(monstr).call{value: 1 ether}("");
-        assertTrue(success, "MON transfer should succeed");
+        (bool success, ) = address(giga).call{value: 1 ether}("");
+        assertTrue(success, "Native transfer should succeed");
 
         // No tokens should be minted
         assertEq(
-            monstr.totalSupply(),
+            giga.totalSupply(),
             initialSupply,
             "No tokens should be minted"
         );
-        assertEq(monstr.balanceOf(alice), 0, "Alice should have no tokens");
+        assertEq(giga.balanceOf(alice), 0, "Alice should have no tokens");
     }
 
     function testReentrancyGuardWorks() public {
-        ReentrancyAttacker attacker = new ReentrancyAttacker(monstr);
+        ReentrancyAttacker attacker = new ReentrancyAttacker(giga);
         vm.deal(address(attacker), 10 ether);
 
         // Attacker tries to reenter during mint
         attacker.attack{value: 2 ether}();
 
         // Check that only one mint succeeded
-        uint256 attackerBalance = monstr.balanceOf(address(attacker));
-        assertEq(attackerBalance, 1.98 ether); // Only one mint: 2 MON * 0.99 (after 1% fee)
+        uint256 attackerBalance = giga.balanceOf(address(attacker));
+        assertEq(attackerBalance, 1.98 ether); // Only one mint: 2 MEGA * 0.99 (after 1% fee)
     }
 
-    function testBeneficiariesReceiveLessMONDueToWMONWithdrawalTiming() public {
+    function testBeneficiariesReceiveLessNativeDueToWrappedWithdrawalTiming() public {
         // KNOWN BUG DOCUMENTATION:
-        // This test documents a timing issue where WMON is withdrawn AFTER beneficiary calculations
-        // in _finalizeAuction(), causing beneficiaries to receive less MON than they should.
+        // This test documents a timing issue where WMEGA is withdrawn AFTER beneficiary calculations
+        // in _finalizeAuction(), causing beneficiaries to receive less MEGA than they should.
         // The bug is complex to reliably reproduce in tests, so this test just documents it.
 
         // Setup initial state
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
         vm.prank(bob);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Move past minting period
         skipPastMintingPeriod();
 
         // Generate fees for first auction
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Start first auction
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get auction details
         uint256 slot1;
         {
-            (, , , uint112 amount, uint32 auctionDay1) = monstr
+            (, , , uint112 amount, uint32 auctionDay1) = giga
                 .currentAuction();
             require(amount > 0, "Should have active auction");
             slot1 = auctionDay1 % 7;
         }
 
-        // Place WETH bid
-        IWMON wethToken = IWMON(address(monstr.wmon()));
+        // Place wrapped native bid
+        IWMEGA wmegaToken = IWMEGA(address(giga.wmega()));
         uint256 bidAmount1 = 1 ether;
         vm.deal(charlie, bidAmount1);
         vm.startPrank(charlie);
-        wmon.deposit{value: bidAmount1}();
-        wmon.approve(address(monstr), bidAmount1);
-        monstr.bid(bidAmount1);
+        wmega.deposit{value: bidAmount1}();
+        wmega.approve(address(giga), bidAmount1);
+        giga.bid(bidAmount1);
         vm.stopPrank();
 
         // Finalize auction - stores as unclaimed prize
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify unclaimed prize stored
         {
-            (address winner1, ) = monstr.auctionUnclaimedPrizes(slot1);
+            (address winner1, ) = giga.auctionUnclaimedPrizes(slot1);
             require(winner1 == charlie, "Charlie should win");
             // Prize amount will be verified when we need it later
         }
@@ -139,67 +139,67 @@ contract StrategyCoreTest is StrategyTestBase {
         // We need to cycle through until we find an auction that will overwrite slot1
         for (uint i = 0; i < 7; i++) {
             vm.prank(alice);
-            monstr.transfer(bob, 0.1 ether);
+            giga.transfer(bob, 0.1 ether);
             vm.warp(block.timestamp + 25 hours + 61);
-            monstr.executeLottery();
+            giga.executeLottery();
 
             // Check if we're at an auction day with matching slot
-            (, , , uint112 currentAmount, uint32 currentDay) = monstr
+            (, , , uint112 currentAmount, uint32 currentDay) = giga
                 .currentAuction();
 
             // Check if this is an auction (not lottery) with the same slot
             if (currentAmount > 0 && currentDay % 7 == slot1) {
-                // Found matching auction - place WETH bid
+                // Found matching auction - place wrapped native bid
                 uint256 bidAmount2 = 0.5 ether;
                 vm.deal(david, bidAmount2);
                 vm.startPrank(david);
-                wmon.deposit{value: bidAmount2}();
-                wmon.approve(address(monstr), bidAmount2);
-                monstr.bid(bidAmount2);
+                wmega.deposit{value: bidAmount2}();
+                wmega.approve(address(giga), bidAmount2);
+                giga.bid(bidAmount2);
                 vm.stopPrank();
 
-                // Get the beneficiary address and make it able to receive MON
-                address beneficiary = monstr.BENEFICIARIES(0);
+                // Get the beneficiary address and make it able to receive MEGA
+                address beneficiary = giga.BENEFICIARIES(0);
                 uint256 beneficiaryBefore = beneficiary.balance;
 
                 // Get balances BEFORE finalization
-                uint256 monBalance = address(monstr).balance;
-                uint256 wmonBalance = wmon.balanceOf(address(monstr));
-                uint256 totalSupply = monstr.totalSupply();
+                uint256 nativeBalance = address(giga).balance;
+                uint256 wmegaBalance = wmega.balanceOf(address(giga));
+                uint256 totalSupply = giga.totalSupply();
 
                 // Calculate expected amount for auction's beneficiary payment
-                // IMPORTANT: The auction calculates BEFORE withdrawing WMON!
+                // IMPORTANT: The auction calculates BEFORE withdrawing WMEGA!
                 // The execution order in _finalizeAuction is:
-                // 1. Calculate MON to send using current balance (line 1108)
-                // 2. Send MON to beneficiary (line 1111)
-                // 3. WMON.withdraw() happens AFTER (line 1124)
+                // 1. Calculate MEGA to send using current balance (line 1108)
+                // 2. Send MEGA to beneficiary (line 1111)
+                // 3. WMEGA.withdraw() happens AFTER (line 1124)
                 //
-                // So the auction does NOT include WMON in its calculation!
+                // So the auction does NOT include WMEGA in its calculation!
                 uint256 expectedAmount;
                 {
                     // Get the auction prize that will be sent to beneficiary
-                    (, uint112 auctionPrize) = monstr.auctionUnclaimedPrizes(
+                    (, uint112 auctionPrize) = giga.auctionUnclaimedPrizes(
                         slot1
                     );
 
                     // Check if there's an unclaimed lottery prize that will be sent first
-                    uint256 lotterySlot = (monstr.getCurrentDay() - 1) % 7;
-                    (, uint112 lotteryPrize) = monstr.lotteryUnclaimedPrizes(
+                    uint256 lotterySlot = (giga.getCurrentDay() - 1) % 7;
+                    (, uint112 lotteryPrize) = giga.lotteryUnclaimedPrizes(
                         lotterySlot
                     );
 
-                    uint256 balanceForAuctionCalc = monBalance;
+                    uint256 balanceForAuctionCalc = nativeBalance;
                     uint256 supplyForAuctionCalc = totalSupply;
 
                     // Account for lottery's beneficiary payment and burn
                     if (lotteryPrize > 0) {
                         uint256 lotteryPayment = (uint256(lotteryPrize) *
-                            monBalance) / totalSupply;
+                            nativeBalance) / totalSupply;
                         balanceForAuctionCalc -= lotteryPayment;
                         supplyForAuctionCalc -= lotteryPrize;
                     }
 
-                    // The auction calculation does NOT include WMON (it's withdrawn after)
+                    // The auction calculation does NOT include WMEGA (it's withdrawn after)
                     expectedAmount =
                         (uint256(auctionPrize) * balanceForAuctionCalc) /
                         supplyForAuctionCalc;
@@ -208,10 +208,10 @@ contract StrategyCoreTest is StrategyTestBase {
 
                 // Finalize auction
                 vm.warp(block.timestamp + 25 hours + 61);
-                monstr.executeLottery();
+                giga.executeLottery();
 
                 // Bug is documented - skip complex verification
-                assertTrue(true, "WMON timing bug documented (see testAuctionWMONWithdrawalTimingAffectsBeneficiaries)");
+                assertTrue(true, "WMEGA timing bug documented (see testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries)");
                 return;
             }
         }
@@ -219,48 +219,48 @@ contract StrategyCoreTest is StrategyTestBase {
         revert("Failed to set up test conditions");
     }
 
-    function testBeneficiariesReceiveLessMONDueToWMONTiming() public {
-        // This test FAILS to show that beneficiaries receive LESS MON than they should
-        // because WMON is withdrawn AFTER the beneficiary calculation
+    function testBeneficiariesReceiveLessNativeDueToWrappedTiming() public {
+        // This test FAILS to show that beneficiaries receive LESS MEGA than they should
+        // because WMEGA is withdrawn AFTER the beneficiary calculation
 
         // Setup: Create a simple scenario with one auction
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
         vm.prank(bob);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Move past minting period
         skipPastMintingPeriod();
 
         // Generate fees and create first auction
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether); // 10 MONSTR fee
+        giga.transfer(bob, 1 ether); // 10 GIGA fee
 
         // Execute to start auction (day 9)
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get current auction details
-        (, , uint96 minBid, uint112 auctionAmount, uint32 auctionDay) = monstr
+        (, , uint96 minBid, uint112 auctionAmount, uint32 auctionDay) = giga
             .currentAuction();
         uint256 slot = auctionDay % 7;
 
-        // Place WETH bid
-        IWMON wethToken = IWMON(address(monstr.wmon()));
+        // Place wrapped native bid
+        IWMEGA wmegaToken = IWMEGA(address(giga.wmega()));
         uint256 bidAmount = minBid > 0 ? uint256(minBid) : 0.1 ether;
         vm.deal(charlie, bidAmount);
         vm.startPrank(charlie);
-        wmon.deposit{value: bidAmount}();
-        wmon.approve(address(monstr), bidAmount);
-        monstr.bid(bidAmount);
+        wmega.deposit{value: bidAmount}();
+        wmega.approve(address(giga), bidAmount);
+        giga.bid(bidAmount);
         vm.stopPrank();
 
         // Finalize auction (day 10)
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify auction prize was stored
-        (address winner, uint112 prizeStored) = monstr.auctionUnclaimedPrizes(
+        (address winner, uint112 prizeStored) = giga.auctionUnclaimedPrizes(
             slot
         );
         assertEq(winner, charlie, "Charlie should be winner");
@@ -274,10 +274,10 @@ contract StrategyCoreTest is StrategyTestBase {
         while (!foundMatchingAuction && attempts < 20) {
             // Generate fees
             vm.prank(alice);
-            monstr.transfer(bob, 0.1 ether);
+            giga.transfer(bob, 0.1 ether);
 
             vm.warp(block.timestamp + 25 hours + 61);
-            monstr.executeLottery();
+            giga.executeLottery();
 
             // Check if we have an auction with matching slot
             (
@@ -286,17 +286,17 @@ contract StrategyCoreTest is StrategyTestBase {
                 uint96 newMinBid,
                 uint112 newAuctionAmount,
                 uint32 newAuctionDay
-            ) = monstr.currentAuction();
+            ) = giga.currentAuction();
             if (newAuctionAmount > 0 && newAuctionDay % 7 == slot) {
-                // Place WETH bid
+                // Place wrapped native bid
                 uint256 newBidAmount = newMinBid > 0
                     ? uint256(newMinBid)
                     : 1 ether;
                 vm.deal(david, newBidAmount);
                 vm.startPrank(david);
-                wmon.deposit{value: newBidAmount}();
-                wmon.approve(address(monstr), newBidAmount);
-                monstr.bid(newBidAmount);
+                wmega.deposit{value: newBidAmount}();
+                wmega.approve(address(giga), newBidAmount);
+                giga.bid(newBidAmount);
                 vm.stopPrank();
 
                 foundMatchingAuction = true;
@@ -307,46 +307,46 @@ contract StrategyCoreTest is StrategyTestBase {
         require(foundMatchingAuction, "Could not find matching auction slot");
 
         // Capture state BEFORE finalization
-        address beneficiary = monstr.BENEFICIARIES(0);
+        address beneficiary = giga.BENEFICIARIES(0);
         uint256 beneficiaryBalanceBefore = beneficiary.balance;
-        uint256 contractMONBalance = address(monstr).balance;
-        uint256 contractWMONBalance = wmon.balanceOf(address(monstr));
-        uint256 totalSupply = monstr.totalSupply();
+        uint256 contractNativeBalance = address(giga).balance;
+        uint256 contractWMEGABalance = wmega.balanceOf(address(giga));
+        uint256 totalSupply = giga.totalSupply();
 
-        // Calculate what SHOULD be sent if WMON was included
-        uint256 expectedIfWMONIncluded = (uint256(prizeStored) *
-            (contractMONBalance + contractWMONBalance)) / totalSupply;
+        // Calculate what SHOULD be sent if WMEGA was included
+        uint256 expectedIfWMEGAIncluded = (uint256(prizeStored) *
+            (contractNativeBalance + contractWMEGABalance)) / totalSupply;
 
         // Finalize - this SHOULD send old prize to beneficiary
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Bug is documented - test setup is complex and hard to reliably trigger the exact condition
-        // See testAuctionWMONWithdrawalTimingAffectsBeneficiaries for bug documentation
-        assertTrue(true, "WMON timing bug documented");
+        // See testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries for bug documentation
+        assertTrue(true, "WMEGA timing bug documented");
     }
 
-    function testAuctionWMONWithdrawalTimingAffectsBeneficiaries() public {
-        // This test would demonstrate that WMON withdrawal timing affects beneficiaries
+    function testAuctionWMEGAWithdrawalTimingAffectsBeneficiaries() public {
+        // This test would degigaate that WMEGA withdrawal timing affects beneficiaries
         // However, the test is complex due to the auction/lottery alternation pattern
         // and the 7-day cycle for unclaimed prizes
 
         // The key issue: In _finalizeAuction(), the order is:
-        // 1. Calculate monToSend = (prize.amount * address(this).balance) / totalSupply()
-        // 2. Send MON to beneficiaries
-        // 3. WMON.withdraw(currentAuction.currentBid) - happens AFTER
+        // 1. Calculate nativeToSend = (prize.amount * address(this).balance) / totalSupply()
+        // 2. Send MEGA to beneficiaries
+        // 3. WMEGA.withdraw(currentAuction.currentBid) - happens AFTER
 
-        // This means beneficiary calculations use a lower MON balance (without WMON)
-        // resulting in less MON sent to beneficiaries than they deserve
+        // This means beneficiary calculations use a lower MEGA balance (without WMEGA)
+        // resulting in less MEGA sent to beneficiaries than they deserve
 
         // Marking test as pending - the issue is confirmed in the code review
         assertTrue(
             true,
-            "WMON timing issue identified - beneficiaries get less MON"
+            "WMEGA timing issue identified - beneficiaries get less MEGA"
         );
     }
 
-    function testETHSentToBeneficiariesNotMonstr() public {
+    function testNativeSentToBeneficiariesNotTokens() public {
         // Setup beneficiary addresses
         address beneficiary1 = address(0x9999);
         address beneficiary2 = address(0x8888);
@@ -358,18 +358,18 @@ contract StrategyCoreTest is StrategyTestBase {
         skipPastMintingPeriod();
 
         // Generate fees
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
-        uint256 bobBalanceBefore = monstr.balanceOf(bob);
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
+        uint256 bobBalanceBefore = giga.balanceOf(bob);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1 ether);
+        bool success = giga.transfer(bob, 1 ether);
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceBalanceBefore - 1 ether,
             "Alice balance should decrease by 1"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             bobBalanceBefore + 0.99 ether,
             "Bob should receive 990 (1000 - 10 fee)"
         );
@@ -377,22 +377,22 @@ contract StrategyCoreTest is StrategyTestBase {
         // Execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get winner
-        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
+        (address winner, uint112 prizeAmount) = giga.lotteryUnclaimedPrizes(
             8 % 7
         );
 
         // Fast forward 14 days to trigger unclaimed prize distribution
         for (uint256 i = 0; i < 14; i++) {
             vm.prank(alice);
-            monstr.transfer(bob, 0.1 ether);
+            giga.transfer(bob, 0.1 ether);
             vm.warp(block.timestamp + 25 hours + 61);
-            monstr.executeLottery();
+            giga.executeLottery();
         }
 
-        // Beneficiaries should receive MON, not MONSTR tokens
+        // Beneficiaries should receive MEGA, not GIGA tokens
         // (Implementation sends to winner if beneficiaries fail)
     }
 
@@ -404,18 +404,18 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // Day 9: Generate fees (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
-        uint256 bobBalanceBefore = monstr.balanceOf(bob);
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
+        uint256 bobBalanceBefore = giga.balanceOf(bob);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1 ether);
+        bool success = giga.transfer(bob, 1 ether);
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceBalanceBefore - 1 ether,
             "Alice balance should decrease"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             bobBalanceBefore + 0.99 ether,
             "Bob should receive 990 after fee"
         );
@@ -423,27 +423,27 @@ contract StrategyCoreTest is StrategyTestBase {
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(
+        (address winner1, uint112 amount1) = giga.lotteryUnclaimedPrizes(
             9 % 7
         );
 
         // Generate fees for multiple days to potentially overwrite slots
         for (uint256 i = 0; i < 14; i++) {
             // Generate fees
-            if (monstr.balanceOf(bob) > 100 ether) {
+            if (giga.balanceOf(bob) > 100 ether) {
                 vm.prank(bob);
-                monstr.transfer(alice, 0.1 ether);
-            } else if (monstr.balanceOf(alice) > 100 ether) {
+                giga.transfer(alice, 0.1 ether);
+            } else if (giga.balanceOf(alice) > 100 ether) {
                 vm.prank(alice);
-                monstr.transfer(bob, 0.1 ether);
+                giga.transfer(bob, 0.1 ether);
             }
 
             // Move to next day and execute
             vm.warp(block.timestamp + 25 hours + 61);
             vm.prevrandao(bytes32(uint256(i * 1000)));
-            monstr.executeLottery();
+            giga.executeLottery();
         }
 
         // After 14 days, unclaimed prizes may be distributed
@@ -460,27 +460,27 @@ contract StrategyCoreTest is StrategyTestBase {
         // Day 9: Generate fees
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
+        (address winner, uint112 prizeAmount) = giga.lotteryUnclaimedPrizes(
             9 % 7
         );
 
         if (winner != address(0)) {
             // Wait 14 days and execute lotteries to trigger unclaimed distribution
             for (uint256 i = 0; i < 14; i++) {
-                if (monstr.balanceOf(alice) > 100 ether) {
+                if (giga.balanceOf(alice) > 100 ether) {
                     vm.prank(alice);
-                    monstr.transfer(bob, 0.1 ether);
+                    giga.transfer(bob, 0.1 ether);
                 }
                 vm.warp(block.timestamp + 25 hours + 61);
                 vm.prevrandao(bytes32(uint256(i * 7777)));
-                monstr.executeLottery();
+                giga.executeLottery();
             }
 
             // After 14 days, prize may be distributed
@@ -500,57 +500,57 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // Generate significant fees
         vm.prank(alice);
-        monstr.transfer(bob, 5 ether); // 0.05 MONSTR fee
+        giga.transfer(bob, 5 ether); // 0.05 GIGA fee
 
         // Execute lottery for day 8
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        // Check if we got a lottery winner (day 8 is even, so should be 25 MONSTR to lottery)
-        (address winner1, uint112 prizeAmount1) = monstr.lotteryUnclaimedPrizes(
+        // Check if we got a lottery winner (day 8 is even, so should be 25 GIGA to lottery)
+        (address winner1, uint112 prizeAmount1) = giga.lotteryUnclaimedPrizes(
             8 % 7
         );
 
         if (winner1 != address(0)) {
             // Track the first beneficiary's balance
-            address firstBeneficiary = monstr.BENEFICIARIES(0);
+            address firstBeneficiary = giga.BENEFICIARIES(0);
             uint256 beneficiaryBalanceBefore = firstBeneficiary.balance;
 
             // Capture contract state BEFORE the 7-day wait (before beneficiary transfer)
-            uint256 contractBalanceBefore = address(monstr).balance;
-            uint256 totalSupplyBefore = monstr.totalSupply();
+            uint256 contractBalanceBefore = address(giga).balance;
+            uint256 totalSupplyBefore = giga.totalSupply();
 
             // Wait 7 days to trigger unclaimed prize distribution
             for (uint256 i = 0; i < 7; i++) {
                 // Generate fees
                 vm.prank(alice);
-                monstr.transfer(bob, 0.1 ether);
+                giga.transfer(bob, 0.1 ether);
 
                 // Execute lottery
                 vm.warp(block.timestamp + 25 hours + 61);
-                monstr.executeLottery();
+                giga.executeLottery();
             }
 
-            // Now check if beneficiary received the correct MON amount
+            // Now check if beneficiary received the correct MEGA amount
             uint256 beneficiaryBalanceAfter = firstBeneficiary.balance;
 
-            // Calculate expected MON based on MONSTR to MON conversion
-            // Should use the contract balance at time of transfer (after WMON withdrawal if any)
-            uint256 expectedMON = (prizeAmount1 * contractBalanceBefore) /
+            // Calculate expected native based on token to native conversion
+            // Should use the contract balance at time of transfer (after WMEGA withdrawal if any)
+            uint256 expectedNative = (prizeAmount1 * contractBalanceBefore) /
                 totalSupplyBefore;
 
             assertApproxEqAbs(
                 beneficiaryBalanceAfter - beneficiaryBalanceBefore,
-                expectedMON,
+                expectedNative,
                 1, // Allow 1 wei difference for rounding
-                "Beneficiary should receive MON based on proper MONSTR/MON conversion"
+                "Beneficiary should receive native token based on proper token/native conversion"
             );
         }
     }
 
     function testBeneficiaryFundingReverts() public {
-        // Deploy a contract that reverts on MON receive as beneficiary
-        MockRejectETH rejectingBeneficiary = new MockRejectETH();
+        // Deploy a contract that reverts on native receive as beneficiary
+        MockRejectNative rejectingBeneficiary = new MockRejectNative();
 
         setupBasicHolders();
 
@@ -560,17 +560,17 @@ contract StrategyCoreTest is StrategyTestBase {
         // Generate fees on day 9 for lottery
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Execute lottery on day 10 - should not revert even if public good rejects
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Check for lottery or auction execution
         // Day 9 could be lottery or auction depending on implementation
-        (address winner, ) = monstr.lotteryUnclaimedPrizes(9 % 7);
-        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (address winner, ) = giga.lotteryUnclaimedPrizes(9 % 7);
+        (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
 
         // Should have either lottery winner or auction
         assertTrue(
@@ -579,10 +579,10 @@ contract StrategyCoreTest is StrategyTestBase {
         );
     }
 
-    function testWETHWithdrawalInAuction() public {
-        // This test verifies WETH handling in auctions
-        // The actual WETH functionality is tested in StrategyAuction.t.sol
-        // Here we just verify the contract can handle WETH
+    function testWrappedNativeWithdrawalInAuction() public {
+        // This test verifies wrapped native handling in auctions
+        // The actual wrapped native functionality is tested in StrategyAuction.t.sol
+        // Here we just verify the contract can handle wrapped native
 
         setupBasicHolders();
 
@@ -591,14 +591,14 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // Generate fees for auction
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Execute to start auction
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify auction was created
-        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
         assertEq(bidder, address(0), "Auction should have no bidder initially");
         assertGt(auctionAmount, 0, "Auction should have tokens");
     }
@@ -609,24 +609,24 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // First mint to the test contract itself to have balance
         vm.deal(address(this), 10 ether);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        uint256 testContractBalance = monstr.balanceOf(address(this));
+        uint256 testContractBalance = giga.balanceOf(address(this));
         assertEq(
             testContractBalance,
             9.9 ether,
             "Test contract should have 9900 tokens"
         );
 
-        uint256 feesPoolBefore = monstr.balanceOf(monstr.FEES_POOL());
-        uint256 lotPoolBefore = monstr.balanceOf(monstr.LOT_POOL());
+        uint256 feesPoolBefore = giga.balanceOf(giga.FEES_POOL());
+        uint256 lotPoolBefore = giga.balanceOf(giga.LOT_POOL());
 
         // Test contract tries to transfer to LOT_POOL
-        monstr.transfer(monstr.LOT_POOL(), 0.1 ether);
+        giga.transfer(giga.LOT_POOL(), 0.1 ether);
 
         // Should be redirected to FEES_POOL
-        uint256 feesPoolAfter = monstr.balanceOf(monstr.FEES_POOL());
-        uint256 lotPoolAfter = monstr.balanceOf(monstr.LOT_POOL());
+        uint256 feesPoolAfter = giga.balanceOf(giga.FEES_POOL());
+        uint256 lotPoolAfter = giga.balanceOf(giga.LOT_POOL());
 
         assertEq(
             lotPoolAfter,
@@ -652,16 +652,16 @@ contract StrategyCoreTest is StrategyTestBase {
         // Generate fees on day 9 (odd day for lottery)
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
-        uint256 lotPoolBefore = monstr.balanceOf(monstr.LOT_POOL());
+        uint256 lotPoolBefore = giga.balanceOf(giga.LOT_POOL());
 
         // Execute lottery on day 10 for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123456)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        uint256 lotPoolAfter = monstr.balanceOf(monstr.LOT_POOL());
+        uint256 lotPoolAfter = giga.balanceOf(giga.LOT_POOL());
 
         // LOT_POOL should have received funds from the internal transfer
         // Either from lottery prize or auction amount
@@ -691,7 +691,7 @@ contract StrategyCoreTest is StrategyTestBase {
             uint256 mintAmount = ((uint256(keccak256(abi.encode(seed, i))) %
                 5) + 1) * 1 ether;
             vm.prank(user);
-            monstr.mint{value: mintAmount}();
+            giga.mint{value: mintAmount}();
         }
 
         // Perform random transfers
@@ -713,31 +713,31 @@ contract StrategyCoreTest is StrategyTestBase {
 
             if (from == to) continue;
 
-            uint256 balance = monstr.balanceOf(from);
+            uint256 balance = giga.balanceOf(from);
             if (balance > 100 ether) {
                 uint256 amount = uint256(
                     keccak256(abi.encode(seed, i, "amount"))
                 ) % (balance / 2);
                 if (amount > 0) {
                     vm.prank(from);
-                    monstr.transfer(to, amount);
+                    giga.transfer(to, amount);
                 }
             }
         }
 
         // Verify invariants
         // 1. Total supply invariant
-        uint256 totalSupply = monstr.totalSupply();
+        uint256 totalSupply = giga.totalSupply();
         uint256 sumOfBalances = 0;
 
         // Sum all special addresses
-        sumOfBalances += monstr.balanceOf(monstr.FEES_POOL());
-        sumOfBalances += monstr.balanceOf(monstr.LOT_POOL());
+        sumOfBalances += giga.balanceOf(giga.FEES_POOL());
+        sumOfBalances += giga.balanceOf(giga.LOT_POOL());
 
         // Sum all user balances
         for (uint256 i = 0; i < numUsers; i++) {
             address user = address(uint160(0x1000 + i));
-            sumOfBalances += monstr.balanceOf(user);
+            sumOfBalances += giga.balanceOf(user);
         }
 
         // Total supply should equal sum of all balances
@@ -749,18 +749,18 @@ contract StrategyCoreTest is StrategyTestBase {
 
         // 2. Fenwick tree consistency
         uint256 fenwickTotal = 0;
-        uint256 holderCount = monstr.getHolderCount();
+        uint256 holderCount = giga.getHolderCount();
         if (holderCount > 0) {
             // getSuffixSum(1) gets the total from the beginning
-            fenwickTotal = monstr.getSuffixSum(1);
+            fenwickTotal = giga.getSuffixSum(1);
         }
 
         // Fenwick should track only EOA holders
         uint256 eoaTotal = 0;
         for (uint256 i = 0; i < numUsers; i++) {
             address user = address(uint160(0x1000 + i));
-            if (monstr.isHolder(user)) {
-                eoaTotal += monstr.balanceOf(user);
+            if (giga.isHolder(user)) {
+                eoaTotal += giga.balanceOf(user);
             }
         }
 

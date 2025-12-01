@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IWMON, Strategy} from "../.././src/Strategy.sol";
+import {IWMEGA, Strategy} from "../.././src/Strategy.sol";
 
-contract MockWMON {
+contract MockWMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -23,7 +23,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MON transfer failed");
+        require(success, "MEGA transfer failed");
         emit Transfer(msg.sender, address(0), amount);
     }
 
@@ -68,23 +68,23 @@ contract MockWMON {
 
 import {Test} from "forge-std/Test.sol";
 
-abstract contract WMONTestBase is Test {
-    IWMON public wmon;
+abstract contract WMEGATestBase is Test {
+    IWMEGA public wmega;
 
-    function setupWMON() internal {
-        // Deploy mock WMON for tests that don't inherit from StrategyTestBase
-        MockWMON mockWmon = new MockWMON();
-        wmon = IWMON(address(mockWmon));
+    function setupWMEGA() internal {
+        // Deploy mock WMEGA for tests that don't inherit from StrategyTestBase
+        MockWMEGA mockWmega = new MockWMEGA();
+        wmega = IWMEGA(address(mockWmega));
     }
 
-    function getWMONAndApprove(
+    function getWMEGAAndApprove(
         address user,
         address spender,
         uint256 amount
     ) internal {
         vm.startPrank(user);
-        wmon.deposit{value: amount}();
-        wmon.approve(spender, amount);
+        wmega.deposit{value: amount}();
+        wmega.approve(spender, amount);
         vm.stopPrank();
     }
 

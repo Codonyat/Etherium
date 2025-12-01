@@ -2,11 +2,11 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMON} from "../src/Strategy.sol";
-import {MockWMON, WMONTestBase} from "././helpers/WSTRATHelpers.sol";
+import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {MockWMEGA, WMEGATestBase} from "././helpers/WSTRATHelpers.sol";
 
-contract StrategyAuctionTest is WMONTestBase {
-    Strategy public monstr;
+contract StrategyAuctionTest is WMEGATestBase {
+    Strategy public giga;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -14,20 +14,20 @@ contract StrategyAuctionTest is WMONTestBase {
     address public david = address(0x4);
 
     // Event definitions for testing
-    event AuctionStarted(uint256 day, uint256 monstrAmount, uint256 minBid);
+    event AuctionStarted(uint256 day, uint256 gigaAmount, uint256 minBid);
     event BidPlaced(address indexed bidder, uint256 amount, uint256 day);
     event BidRefunded(address indexed bidder, uint256 amount);
     event AuctionWon(
         address indexed winner,
-        uint256 monstrAmount,
-        uint256 monPaid,
+        uint256 gigaAmount,
+        uint256 megaPaid,
         uint256 day
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
 
     function setUp() public {
-        setupWMON();
-        monstr = new Strategy(address(wmon));
+        setupWMEGA();
+        giga = new Strategy(address(wmega));
 
         // Fund test accounts
         vm.deal(alice, 100 ether);
@@ -36,176 +36,176 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.deal(david, 100 ether);
     }
 
-    function testAuctionWithWMONBidding() public {
+    function testAuctionWithWrappedBidding() public {
         // Generate fees during minting period
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Fast forward past minting period
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
 
-        // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        // Generate fees via transfer (alice has 9.9 tokens from 10 MEGA mint with 1:1 ratio)
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
+        bool success = giga.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceBalanceBefore - 1 ether,
             "Alice balance should decrease by 1"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             0.99 ether,
             "Bob should receive 0.99 (1 - 0.01 fee)"
         );
 
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get auction details
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with WMON
-        getWMONAndApprove(alice, address(monstr), 1 ether);
+        // Alice bids with wrapped token
+        getWMEGAAndApprove(alice, address(giga), 1 ether);
         vm.prank(alice);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
         // Bob outbids
         uint256 newBid = (minBid * 110) / 100;
-        getWMONAndApprove(bob, address(monstr), 1 ether);
+        getWMEGAAndApprove(bob, address(giga), 1 ether);
         vm.prank(bob);
-        monstr.bid(newBid);
+        giga.bid(newBid);
 
-        // Verify Alice got refunded in WMON
-        assertEq(wmon.balanceOf(alice), 1 ether, "Alice should be refunded");
+        // Verify Alice got refunded in wrapped token
+        assertEq(wmega.balanceOf(alice), 1 ether, "Alice should be refunded");
 
         // Verify Bob is current bidder
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testAuctionFinalizationConvertsWMONToMON() public {
+    function testAuctionFinalizationConvertsWrappedToNative() public {
         // Generate fees
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Fast forward past minting period
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
 
-        // Generate fees via transfer (alice has 9.9 tokens from 10 MON mint with 1:1 ratio)
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        // Generate fees via transfer (alice has 9.9 tokens from 10 MEGA mint with 1:1 ratio)
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
+        bool success = giga.transfer(bob, 1 ether); // Transfer 1 token, 0.01 token fee
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceBalanceBefore - 1 ether,
             "Alice balance should decrease by 1"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             0.99 ether,
             "Bob should receive 0.99 (1 - 0.01 fee)"
         );
 
         // Execute lottery/auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Place bid
-        (, , uint96 minBid, , ) = monstr.currentAuction();
-        getWMONAndApprove(alice, address(monstr), 1 ether);
+        (, , uint96 minBid, , ) = giga.currentAuction();
+        getWMEGAAndApprove(alice, address(giga), 1 ether);
         vm.prank(alice);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
-        uint256 contractMONBefore = address(monstr).balance;
-        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
-        assertEq(contractWMONBefore, minBid, "Contract should hold WMON");
+        uint256 contractNativeBefore = address(giga).balance;
+        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
+        assertEq(contractWrappedBefore, minBid, "Contract should hold wrapped token");
 
         // Generate fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
-        monstr.transfer(alice, 0.5 ether); // Generate 0.005 token fee
+        giga.transfer(alice, 0.5 ether); // Generate 0.005 token fee
 
         // Finalize auction
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        // Verify WMON was converted to MON
-        uint256 contractWMONAfter = wmon.balanceOf(address(monstr));
+        // Verify wrapped token was converted to native
+        uint256 contractWrappedAfter = wmega.balanceOf(address(giga));
 
-        assertEq(contractWMONAfter, 0, "Contract should have no WMON");
-        // The important thing is that WMON was successfully withdrawn and converted to MON
-        // The MON balance may change due to beneficiary funding, but WMON should be zero
+        assertEq(contractWrappedAfter, 0, "Contract should have no wrapped token");
+        // The important thing is that wrapped token was successfully withdrawn and converted to native
+        // The native balance may change due to beneficiary funding, but wrapped should be zero
     }
 
     function testBidIncrementRequirement() public {
         // Setup auction
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
         // First bid at minimum
-        getWMONAndApprove(alice, address(monstr), 1 ether);
+        getWMEGAAndApprove(alice, address(giga), 1 ether);
         vm.prank(alice);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
         // Try to bid with less than 10% increase
         uint256 lowBid = (minBid * 109) / 100; // 9% increase
-        getWMONAndApprove(bob, address(monstr), 1 ether);
+        getWMEGAAndApprove(bob, address(giga), 1 ether);
         vm.prank(bob);
         vm.expectRevert("Bid too low");
-        monstr.bid(lowBid);
+        giga.bid(lowBid);
 
         // Bid with exactly 10% increase should work
         uint256 validBid = (minBid * 110) / 100;
         vm.prank(bob);
-        monstr.bid(validBid);
+        giga.bid(validBid);
 
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
     function testNoBidAuctionRollover() public {
         // Generate fees
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Day 8 - Start auction but don't bid (distributes day 7's fees)
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Generate more fees on day 8 for day 9's lottery/auction
         vm.prank(bob);
-        monstr.transfer(alice, 0.5 ether); // Generate 0.005 token fee
+        giga.transfer(alice, 0.5 ether); // Generate 0.005 token fee
 
         // Get FEES_POOL balance before rollover
-        uint256 feesPoolBefore = monstr.balanceOf(monstr.FEES_POOL());
+        uint256 feesPoolBefore = giga.balanceOf(giga.FEES_POOL());
 
         // Day 9 - Previous auction ends without bids, new lottery/auction starts
         vm.warp(block.timestamp + 25 hours + 1 minutes);
 
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // After auction rollover, funds should be back in FEES_POOL
-        uint256 feesPoolAfter = monstr.balanceOf(monstr.FEES_POOL());
+        uint256 feesPoolAfter = giga.balanceOf(giga.FEES_POOL());
 
         // The rolled over amount from the failed auction goes back to FEES_POOL
         // This ensures it will be distributed in the next lottery/auction
@@ -218,10 +218,10 @@ contract StrategyAuctionTest is WMONTestBase {
 
     function test50_50FeeSplitAfterMintingPeriod() public {
         // Generate tokens during minting
-        // 100 MON = 100 MONSTR tokens before fee
+        // 100 MEGA = 100 GIGA tokens before fee
         vm.prank(alice);
-        monstr.mint{value: 100 ether}(); // Alice gets 99 tokens after 1% fee
-        // During minting period, 1% fee is minted as tokens: 100 MON * 1:1 ratio * 1% = 1 token
+        giga.mint{value: 100 ether}(); // Alice gets 99 tokens after 1% fee
+        // During minting period, 1% fee is minted as tokens: 100 MEGA * 1:1 ratio * 1% = 1 token
 
         // After minting period (day 8 = 8 * 25 hours from start)
         vm.warp(block.timestamp + 8 * 25 hours);
@@ -229,13 +229,13 @@ contract StrategyAuctionTest is WMONTestBase {
         // Alice has 99 tokens
         // Transfer 10 tokens (generates 0.1 token fee)
         vm.prank(alice);
-        monstr.transfer(bob, 10 ether);
+        giga.transfer(bob, 10 ether);
         // Bob got 9.9 tokens (10 - 0.1 fee), transfers some back
         vm.prank(bob);
-        monstr.transfer(alice, 9 ether); // generates 0.09 token fee
+        giga.transfer(alice, 9 ether); // generates 0.09 token fee
 
         // Check FEES_POOL balance for accumulated fees
-        uint256 totalFees = monstr.balanceOf(monstr.FEES_POOL());
+        uint256 totalFees = giga.balanceOf(giga.FEES_POOL());
         // We expect accumulated fees: 1 (from minting) + 0.1 + 0.09 = 1.19 ether
         assertEq(
             totalFees,
@@ -247,63 +247,63 @@ contract StrategyAuctionTest is WMONTestBase {
         vm.warp(block.timestamp + 25 hours + 1 minutes);
 
         // We generated fees on day 8, so we execute on day 9 to distribute day 8's fees
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify auction has half the fees (0.595 tokens)
-        (, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , , uint112 auctionAmount, ) = giga.currentAuction();
         assertEq(auctionAmount, 0.595 ether, "Auction should have 0.595 tokens");
     }
 
     function testMinimumBidCalculation() public {
         // Test that minimum bid is calculated correctly
-        // New Formula: MinBid = (MON balance * feesToDistribute) / (2 * totalSupply)
+        // New Formula: MinBid = (native balance * feesToDistribute) / (2 * totalSupply)
 
-        // Setup: Create known MON balance and total supply
+        // Setup: Create known MEGA balance and total supply
         vm.prank(alice);
-        monstr.mint{value: 10 ether}(); // 9.9 MONSTR to alice, 0.1 to fees
+        giga.mint{value: 10 ether}(); // 9.9 GIGA to alice, 0.1 to fees
         vm.prank(bob);
-        monstr.mint{value: 5 ether}(); // 4.95 MONSTR to bob, 0.05 to fees
+        giga.mint{value: 5 ether}(); // 4.95 GIGA to bob, 0.05 to fees
 
-        // Total supply: 9.9 + 0.1 + 4.95 + 0.05 = 15 MONSTR
-        // MON balance: 15 MON
+        // Total supply: 9.9 + 0.1 + 4.95 + 0.05 = 15 GIGA
+        // MEGA balance: 15 MEGA
         uint256 expectedTotalSupply = 15 ether;
-        uint256 monBalance = 15 ether;
+        uint256 megaBalance = 15 ether;
         assertEq(
-            monstr.totalSupply(),
+            giga.totalSupply(),
             expectedTotalSupply,
-            "Total supply should be 15 MONSTR"
+            "Total supply should be 15 GIGA"
         );
         assertEq(
-            address(monstr).balance,
-            monBalance,
-            "Contract should have 15 MON"
+            address(giga).balance,
+            megaBalance,
+            "Contract should have 15 MEGA"
         );
 
         // Move past minting period
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
 
         // Generate specific amount of fees for auction
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether); // 0.01 MONSTR fee
+        giga.transfer(bob, 1 ether); // 0.01 GIGA fee
 
         // Execute to start auction - fees will be split 50/50 between lottery and auction
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get auction details
-        (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
-        // After transfer: 0.01 MONSTR fee generated
-        // Split 50/50: 0.005 MONSTR for lottery, 0.005 MONSTR for auction
-        assertEq(auctionAmount, 0.005 ether, "Auction should be for 0.005 MONSTR");
+        // After transfer: 0.01 GIGA fee generated
+        // Split 50/50: 0.005 GIGA for lottery, 0.005 GIGA for auction
+        assertEq(auctionAmount, 0.005 ether, "Auction should be for 0.005 GIGA");
 
         // Calculate expected minimum bid with new formula
-        // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
-        // = (15 MON * 0.005 MONSTR) / (2 * 15 MONSTR)
-        // = 0.075 / 30 MON
-        // = 0.0025 MON
+        // MinBid = (megaBalance * auctionAmount) / (2 * totalSupply)
+        // = (15 MEGA * 0.005 GIGA) / (2 * 15 GIGA)
+        // = 0.075 / 30 MEGA
+        // = 0.0025 MEGA
 
-        uint256 expectedMinBid = (monBalance * auctionAmount) /
+        uint256 expectedMinBid = (megaBalance * auctionAmount) /
             (2 * expectedTotalSupply);
 
         assertEq(
@@ -311,54 +311,54 @@ contract StrategyAuctionTest is WMONTestBase {
             expectedMinBid,
             "Minimum bid should match calculated value"
         );
-        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 MON");
+        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 MEGA");
 
         // Verify that bidding exactly the minimum bid works
-        getWMONAndApprove(alice, address(monstr), minBid);
+        getWMEGAAndApprove(alice, address(giga), minBid);
         vm.prank(alice);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
-        (address currentBidder, uint96 currentBid, , , ) = monstr
+        (address currentBidder, uint96 currentBid, , , ) = giga
             .currentAuction();
         assertEq(currentBidder, alice, "Alice should be current bidder");
         assertEq(currentBid, minBid, "Current bid should equal minimum bid");
 
         // Verify bidding below minimum fails
-        getWMONAndApprove(bob, address(monstr), minBid);
+        getWMEGAAndApprove(bob, address(giga), minBid);
         vm.prank(bob);
         vm.expectRevert("Bid too low");
-        monstr.bid(minBid - 1);
+        giga.bid(minBid - 1);
     }
 
     function testMinimumBidWithDifferentBalances() public {
-        // Test minimum bid calculation with various MON balances and fee amounts
+        // Test minimum bid calculation with various MEGA balances and fee amounts
 
-        // Scenario 1: Low MON balance, high supply (deflated token)
+        // Scenario 1: Low MEGA balance, high supply (deflated token)
         vm.prank(alice);
-        monstr.mint{value: 100 ether}(); // 99 MONSTR
+        giga.mint{value: 100 ether}(); // 99 GIGA
 
         // Burn most tokens to simulate deflation
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.prank(alice);
-        monstr.redeem(90 ether); // Burns 89.1 MONSTR, returns ~89.1 MON
+        giga.redeem(90 ether); // Burns 89.1 GIGA, returns ~89.1 MEGA
 
-        uint256 remainingSupply = monstr.totalSupply();
-        uint256 remainingETH = address(monstr).balance;
+        uint256 remainingSupply = giga.totalSupply();
+        uint256 remainingNative = address(giga).balance;
 
         // Generate fees
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether); // 10 MONSTR fee
+        giga.transfer(bob, 1 ether); // 10 GIGA fee
 
         // Start auction
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid1, uint112 auctionAmount1, ) = monstr
+        (, , uint96 minBid1, uint112 auctionAmount1, ) = giga
             .currentAuction();
 
         // Verify minimum bid with new formula
-        // MinBid = (MON balance * auctionAmount) / (2 * totalSupply)
-        uint256 expectedMin1 = (remainingETH * auctionAmount1) /
+        // MinBid = (native balance * auctionAmount) / (2 * totalSupply)
+        uint256 expectedMin1 = (remainingNative * auctionAmount1) /
             (2 * remainingSupply);
         assertEq(
             minBid1,
@@ -366,75 +366,75 @@ contract StrategyAuctionTest is WMONTestBase {
             "Min bid should match expected calculation"
         );
 
-        // Scenario 2: High MON balance from donations
+        // Scenario 2: High MEGA balance from donations
         // Reset with new deployment for clean state
         vm.warp(block.timestamp + 30 days); // Clear any time dependencies
 
-        // Someone donates MON to increase backing
+        // Someone donates MEGA to increase backing
         vm.deal(address(this), 50 ether);
-        (bool sent, ) = address(monstr).call{value: 50 ether}("");
-        assertTrue(sent, "MON donation should succeed");
+        (bool sent, ) = address(giga).call{value: 50 ether}("");
+        assertTrue(sent, "Native donation should succeed");
 
         // Generate new fees
         vm.prank(alice);
-        monstr.transfer(bob, 0.5 ether);
+        giga.transfer(bob, 0.5 ether);
 
         // Start new auction
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid2, uint112 auctionAmount2, ) = monstr
+        (, , uint96 minBid2, uint112 auctionAmount2, ) = giga
             .currentAuction();
 
-        uint256 currentETH = address(monstr).balance;
-        uint256 currentSupply = monstr.totalSupply();
-        uint256 expectedMin2 = (currentETH * auctionAmount2) /
+        uint256 currentNative = address(giga).balance;
+        uint256 currentSupply = giga.totalSupply();
+        uint256 expectedMin2 = (currentNative * auctionAmount2) /
             (2 * currentSupply);
 
         assertEq(
             minBid2,
             expectedMin2,
-            "Min bid should reflect increased MON backing"
+            "Min bid should reflect increased MEGA backing"
         );
 
         // The minimum bid should be higher due to the donation increasing the backing value
         assertTrue(
             minBid2 > minBid1,
-            "Higher MON backing should result in higher min bid"
+            "Higher MEGA backing should result in higher min bid"
         );
     }
 
     function testMinimumBidFormula() public {
         // Test that minimum bid uses the correct formula
-        // Formula: MinBid = (MON balance * auctionAmount) / (2 * totalSupply)
+        // Formula: MinBid = (native balance * auctionAmount) / (2 * totalSupply)
 
-        // Using 3 MON to create 3 MONSTR total supply
+        // Using 3 MEGA to create 3 GIGA total supply
         vm.prank(alice);
-        monstr.mint{value: 3 ether}(); // 2.97 MONSTR to alice, 0.03 to fees
+        giga.mint{value: 3 ether}(); // 2.97 GIGA to alice, 0.03 to fees
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
 
-        // Generate an odd fee amount: 0.007 MONSTR
-        // After split: 0.0035 MONSTR for auction
+        // Generate an odd fee amount: 0.007 GIGA
+        // After split: 0.0035 GIGA for auction
         vm.prank(alice);
-        monstr.transfer(bob, 0.7 ether); // 0.007 MONSTR fee
+        giga.transfer(bob, 0.7 ether); // 0.007 GIGA fee
 
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
-        uint256 monBalance = address(monstr).balance;
-        uint256 totalSupply = monstr.totalSupply();
+        uint256 megaBalance = address(giga).balance;
+        uint256 totalSupply = giga.totalSupply();
 
-        // The auction should have 0.0035 MONSTR (half of 0.007)
-        assertEq(auctionAmount, 0.0035 ether, "Auction should have 0.0035 MONSTR");
+        // The auction should have 0.0035 GIGA (half of 0.007)
+        assertEq(auctionAmount, 0.0035 ether, "Auction should have 0.0035 GIGA");
 
         // Calculate with new formula
-        // MinBid = (monBalance * auctionAmount) / (2 * totalSupply)
-        // = (3 MON * 0.0035 MONSTR) / (2 * 3 MONSTR)
-        // = 0.0105 / 6 = 0.00175 MON
-        uint256 expectedMinBid = (monBalance * auctionAmount) /
+        // MinBid = (megaBalance * auctionAmount) / (2 * totalSupply)
+        // = (3 MEGA * 0.0035 GIGA) / (2 * 3 GIGA)
+        // = 0.0105 / 6 = 0.00175 MEGA
+        uint256 expectedMinBid = (megaBalance * auctionAmount) /
             (2 * totalSupply);
 
         assertEq(
@@ -444,7 +444,7 @@ contract StrategyAuctionTest is WMONTestBase {
         );
 
         // The minimum bid is now half of the redemption value
-        uint256 redemptionValue = (auctionAmount * monBalance) / totalSupply;
+        uint256 redemptionValue = (auctionAmount * megaBalance) / totalSupply;
         assertEq(
             minBid,
             redemptionValue / 2,
@@ -452,272 +452,272 @@ contract StrategyAuctionTest is WMONTestBase {
         );
     }
 
-    // ============ Native MON Bidding Tests ============
+    // ============ Native MEGA Bidding Tests ============
 
-    function testBidWithNativeMON() public {
+    function testBidWithNative() public {
         // Setup: Generate fees and start auction
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MON
+        // Alice bids with native MEGA
         uint256 aliceBalanceBefore = alice.balance;
         vm.prank(alice);
-        monstr.bid{value: minBid}(0); // Pass 0 as bidAmount when using msg.value
+        giga.bid{value: minBid}(0); // Pass 0 as bidAmount when using msg.value
 
-        // Verify Alice's MON balance decreased
+        // Verify Alice's MEGA balance decreased
         assertEq(
             alice.balance,
             aliceBalanceBefore - minBid,
-            "Alice should have spent MON"
+            "Alice should have spent MEGA"
         );
 
-        // Verify contract received WMON (not native MON)
+        // Verify contract received wrapped token (not native)
         assertEq(
-            wmon.balanceOf(address(monstr)),
+            wmega.balanceOf(address(giga)),
             minBid,
-            "Contract should hold WMON"
+            "Contract should hold wrapped token"
         );
 
         // Verify Alice is the current bidder
-        (address currentBidder, uint96 currentBid, , , ) = monstr
+        (address currentBidder, uint96 currentBid, , , ) = giga
             .currentAuction();
         assertEq(currentBidder, alice, "Alice should be current bidder");
         assertEq(currentBid, minBid, "Bid amount should match minBid");
     }
 
-    function testBidWithNativeMONOverridesBidAmount() public {
+    function testBidWithNativeOverridesBidAmount() public {
         // Test that msg.value takes precedence over bidAmount parameter
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice sends native MON but passes different bidAmount parameter
+        // Alice sends native MEGA but passes different bidAmount parameter
         vm.prank(alice);
-        monstr.bid{value: minBid}(999999 ether); // This gets ignored
+        giga.bid{value: minBid}(999999 ether); // This gets ignored
 
         // Verify the actual bid is msg.value, not the parameter
-        (, uint96 currentBid, , , ) = monstr.currentAuction();
+        (, uint96 currentBid, , , ) = giga.currentAuction();
         assertEq(currentBid, minBid, "Bid should be msg.value, not parameter");
     }
 
-    function testNativeMONBidRefundsInWMON() public {
-        // Test that previous bidders get WMON refund even if current bidder uses native MON
+    function testNativeBidRefundsInWrapped() public {
+        // Test that previous bidders get wrapped token refund even if current bidder uses native
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with WMON - get enough WMON for the bid
-        getWMONAndApprove(alice, address(monstr), minBid);
+        // Alice bids with wrapped token - get enough wrapped token for the bid
+        getWMEGAAndApprove(alice, address(giga), minBid);
         vm.prank(alice);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
-        // Bob outbids with native MON
+        // Bob outbids with native MEGA
         uint256 newBid = (minBid * 110) / 100;
         vm.prank(bob);
-        monstr.bid{value: newBid}(0);
+        giga.bid{value: newBid}(0);
 
-        // Verify Alice got refunded in WMON (not native MON)
+        // Verify Alice got refunded in wrapped token (not native MEGA)
         // She should get back exactly what she bid
         assertEq(
-            wmon.balanceOf(alice),
+            wmega.balanceOf(alice),
             minBid,
-            "Alice should receive WMON refund equal to her bid"
+            "Alice should receive wrapped token refund equal to her bid"
         );
 
         // Verify Bob is current bidder
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testMixedNativeMONAndWMONBids() public {
-        // Test that native MON and WMON bids can be mixed in same auction
+    function testMixedNativeAndWrappedBids() public {
+        // Test that native and wrapped token bids can be mixed in same auction
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MON
+        // Alice bids with native MEGA
         vm.prank(alice);
-        monstr.bid{value: minBid}(0);
+        giga.bid{value: minBid}(0);
 
-        // Bob outbids with WMON
+        // Bob outbids with wrapped token
         uint256 bid2 = (minBid * 110) / 100;
-        getWMONAndApprove(bob, address(monstr), bid2);
+        getWMEGAAndApprove(bob, address(giga), bid2);
         vm.prank(bob);
-        monstr.bid(bid2);
+        giga.bid(bid2);
 
-        // Charlie outbids with native MON
+        // Charlie outbids with native MEGA
         uint256 bid3 = (bid2 * 110) / 100;
         vm.prank(charlie);
-        monstr.bid{value: bid3}(0);
+        giga.bid{value: bid3}(0);
 
-        // David outbids with WMON
+        // David outbids with wrapped token
         uint256 bid4 = (bid3 * 110) / 100;
-        getWMONAndApprove(david, address(monstr), bid4);
+        getWMEGAAndApprove(david, address(giga), bid4);
         vm.prank(david);
-        monstr.bid(bid4);
+        giga.bid(bid4);
 
-        // Verify all previous bidders got WMON refunds
+        // Verify all previous bidders got wrapped token refunds
         assertEq(
-            wmon.balanceOf(alice),
+            wmega.balanceOf(alice),
             minBid,
-            "Alice should have WMON refund"
+            "Alice should have wrapped token refund"
         );
-        assertEq(wmon.balanceOf(bob), bid2, "Bob should have WMON refund");
+        assertEq(wmega.balanceOf(bob), bid2, "Bob should have wrapped token refund");
         assertEq(
-            wmon.balanceOf(charlie),
+            wmega.balanceOf(charlie),
             bid3,
-            "Charlie should have WMON refund"
+            "Charlie should have wrapped token refund"
         );
 
         // Verify David is the winner
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, david, "David should be current bidder");
     }
 
-    function testNativeMONBidTooLow() public {
-        // Test that bidding with native MON below minimum reverts
+    function testNativeBidTooLow() public {
+        // Test that bidding with native MEGA below minimum reverts
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice tries to bid with native MON below minimum
+        // Alice tries to bid with native MEGA below minimum
         vm.prank(alice);
         vm.expectRevert("Bid too low");
-        monstr.bid{value: minBid - 1}(0);
+        giga.bid{value: minBid - 1}(0);
 
         // Verify no bid was placed
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, address(0), "Should have no bidder");
     }
 
-    function testNativeMONBidRevertRollback() public {
-        // Test that if native MON bid fails, the WMON wrapping is rolled back
+    function testNativeBidRevertRollback() public {
+        // Test that if native bid fails, the wrapping is rolled back
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
         uint256 aliceBalanceBefore = alice.balance;
-        uint256 wmonBalanceBefore = wmon.balanceOf(address(monstr));
+        uint256 wmegaBalanceBefore = wmega.balanceOf(address(giga));
 
-        // Alice tries to bid too low with native MON
+        // Alice tries to bid too low with native MEGA
         vm.prank(alice);
         vm.expectRevert("Bid too low");
-        monstr.bid{value: minBid - 1}(0);
+        giga.bid{value: minBid - 1}(0);
 
-        // Verify Alice's MON was refunded (transaction reverted)
+        // Verify Alice's MEGA was refunded (transaction reverted)
         assertEq(
             alice.balance,
             aliceBalanceBefore,
-            "Alice should have same MON balance"
+            "Alice should have same MEGA balance"
         );
 
-        // Verify contract didn't receive any WMON
+        // Verify contract didn't receive any wrapped token
         assertEq(
-            wmon.balanceOf(address(monstr)),
-            wmonBalanceBefore,
-            "Contract should have same WMON balance"
+            wmega.balanceOf(address(giga)),
+            wmegaBalanceBefore,
+            "Contract should have same wrapped token balance"
         );
     }
 
-    function testAuctionFinalizationWithNativeMONWinner() public {
-        // Test that auction finalization works correctly when winner used native MON
+    function testAuctionFinalizationWithNativeWinner() public {
+        // Test that auction finalization works correctly when winner used native MEGA
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
-        // Alice bids with native MON
+        // Alice bids with native MEGA
         vm.prank(alice);
-        monstr.bid{value: minBid}(0);
+        giga.bid{value: minBid}(0);
 
-        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
+        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
         assertEq(
-            contractWMONBefore,
+            contractWrappedBefore,
             minBid,
-            "Contract should hold Alice's WMON bid"
+            "Contract should hold Alice's wrapped bid"
         );
 
         // Generate fees for next day
         vm.prank(bob);
-        monstr.transfer(alice, 0.5 ether);
+        giga.transfer(alice, 0.5 ether);
 
         // Finalize auction by triggering next day's lottery
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        // Verify WMON was withdrawn to MON
+        // Verify wrapped token was withdrawn to native
         assertEq(
-            wmon.balanceOf(address(monstr)),
+            wmega.balanceOf(address(giga)),
             0,
-            "Contract should have no WMON after finalization"
+            "Contract should have no wrapped token after finalization"
         );
 
         // Verify Alice won the auction and has claimable prize (at least the auction amount)
         vm.prank(alice);
-        uint256 claimable = monstr.getMyClaimableAmount();
+        uint256 claimable = giga.getMyClaimableAmount();
         assertGe(
             claimable,
             auctionAmount,
@@ -725,10 +725,10 @@ contract StrategyAuctionTest is WMONTestBase {
         );
 
         // Verify Alice can actually claim her prize
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
         vm.prank(alice);
-        monstr.claim();
-        uint256 aliceBalanceAfter = monstr.balanceOf(alice);
+        giga.claim();
+        uint256 aliceBalanceAfter = giga.balanceOf(alice);
 
         assertEq(
             aliceBalanceAfter - aliceBalanceBefore,
@@ -737,78 +737,78 @@ contract StrategyAuctionTest is WMONTestBase {
         );
     }
 
-    function testNativeMONBidIncrementRequirement() public {
-        // Test that 10% increment rule applies to native MON bids
+    function testNativeBidIncrementRequirement() public {
+        // Test that 10% increment rule applies to native MEGA bids
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        // Alice bids with native MON
+        // Alice bids with native MEGA
         vm.prank(alice);
-        monstr.bid{value: minBid}(0);
+        giga.bid{value: minBid}(0);
 
-        // Bob tries to bid with only 9% increase using native MON
+        // Bob tries to bid with only 9% increase using native MEGA
         uint256 lowBid = (minBid * 109) / 100;
         vm.prank(bob);
         vm.expectRevert("Bid too low");
-        monstr.bid{value: lowBid}(0);
+        giga.bid{value: lowBid}(0);
 
-        // Bob bids with exactly 10% increase using native MON
+        // Bob bids with exactly 10% increase using native MEGA
         uint256 validBid = (minBid * 110) / 100;
         vm.prank(bob);
-        monstr.bid{value: validBid}(0);
+        giga.bid{value: validBid}(0);
 
         // Verify Bob is now the current bidder
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, bob, "Bob should be current bidder");
     }
 
-    function testNativeMONWrappingCorrectness() public {
-        // Test that native MON is correctly wrapped to WMON
+    function testNativeWrappingCorrectness() public {
+        // Test that native token is correctly wrapped
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
-        uint256 contractNativeBefore = address(monstr).balance;
-        uint256 contractWMONBefore = wmon.balanceOf(address(monstr));
+        uint256 contractNativeBefore = address(giga).balance;
+        uint256 contractWrappedBefore = wmega.balanceOf(address(giga));
 
-        // Alice bids with native MON
+        // Alice bids with native MEGA
         vm.prank(alice);
-        monstr.bid{value: minBid}(0);
+        giga.bid{value: minBid}(0);
 
-        // Contract's native MON should not increase (it gets wrapped)
-        // Actually, it will increase because wmon.deposit returns MON to contract via receive()
-        // But WMON balance should definitely increase
+        // Contract's native MEGA should not increase (it gets wrapped)
+        // Actually, it will increase because wmega.deposit returns MEGA to contract via receive()
+        // But wrapped token balance should definitely increase
         assertEq(
-            wmon.balanceOf(address(monstr)),
-            contractWMONBefore + minBid,
-            "Contract should have received WMON"
+            wmega.balanceOf(address(giga)),
+            contractWrappedBefore + minBid,
+            "Contract should have received wrapped token"
         );
 
-        // Verify the WMON amount matches the bid amount exactly
-        (, uint96 currentBid, , , ) = monstr.currentAuction();
+        // Verify the wrapped token amount matches the bid amount exactly
+        (, uint96 currentBid, , , ) = giga.currentAuction();
         assertEq(
-            wmon.balanceOf(address(monstr)),
+            wmega.balanceOf(address(giga)),
             currentBid,
-            "WMON balance should match bid amount"
+            "Wrapped token balance should match bid amount"
         );
     }
 }
@@ -824,14 +824,14 @@ contract MaliciousBidder {
     }
 }
 
-contract StrategyAuctionSecurityTest is WMONTestBase {
-    Strategy public monstr;
+contract StrategyAuctionSecurityTest is WMEGATestBase {
+    Strategy public giga;
     address public alice = address(0x1);
     address public maliciousBidder;
 
     function setUp() public {
-        setupWMON();
-        monstr = new Strategy(address(wmon));
+        setupWMEGA();
+        giga = new Strategy(address(wmega));
 
         vm.deal(alice, 100 ether);
 
@@ -840,40 +840,40 @@ contract StrategyAuctionSecurityTest is WMONTestBase {
         vm.deal(maliciousBidder, 100 ether);
     }
 
-    function testWETHPreventsRefundDoS() public {
+    function testWrappedNativePreventsRefundDoS() public {
         // Setup auction
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
-        skipPastMintingPeriod(monstr);
+        skipPastMintingPeriod(giga);
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        monstr.transfer(address(0x99), 1 ether);
+        giga.transfer(address(0x99), 1 ether);
 
         vm.warp(block.timestamp + 25 hours + 1 minutes);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        (, , uint96 minBid, , ) = monstr.currentAuction();
+        (, , uint96 minBid, , ) = giga.currentAuction();
 
         // Malicious bidder places bid
-        getWMONAndApprove(maliciousBidder, address(monstr), 1 ether);
+        getWMEGAAndApprove(maliciousBidder, address(giga), 1 ether);
         vm.prank(maliciousBidder);
-        monstr.bid(minBid);
+        giga.bid(minBid);
 
-        // Alice can still outbid even though malicious bidder reverts on MON
+        // Alice can still outbid even though malicious bidder reverts on MEGA
         uint256 newBid = (minBid * 110) / 100;
-        getWMONAndApprove(alice, address(monstr), 1 ether);
+        getWMEGAAndApprove(alice, address(giga), 1 ether);
         vm.prank(alice);
-        monstr.bid(newBid); // This would fail with MON but succeeds with WMON
+        giga.bid(newBid); // This would fail with native but succeeds with wrapped token
 
-        // Verify malicious bidder got WMON refund
+        // Verify malicious bidder got wrapped token refund
         assertEq(
-            wmon.balanceOf(maliciousBidder),
+            wmega.balanceOf(maliciousBidder),
             1 ether,
-            "Should receive WMON refund"
+            "Should receive wrapped native refund"
         );
 
-        (address currentBidder, , , , ) = monstr.currentAuction();
+        (address currentBidder, , , , ) = giga.currentAuction();
         assertEq(currentBidder, alice, "Alice should be current bidder");
     }
 }

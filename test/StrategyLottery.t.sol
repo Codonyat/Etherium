@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {StrategyTestBase, MockContract, MockRejectETH} from "./helpers/StrategyTestBase.sol";
+import {StrategyTestBase, MockContract, MockRejectNative} from "./helpers/StrategyTestBase.sol";
 import {console} from "forge-std/Test.sol";
 
 contract StrategyLotteryTest is StrategyTestBase {
@@ -10,39 +10,39 @@ contract StrategyLotteryTest is StrategyTestBase {
         vm.expectEmit(true, false, false, true);
         emit Minted(alice, 10 ether, 9.9 ether, 0.1 ether);
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             9.9 ether,
-            "Alice should have 9.9 MONSTR"
+            "Alice should have 9.9 GIGA"
         );
 
         vm.expectEmit(true, false, false, true);
         emit Minted(bob, 5 ether, 4.95 ether, 0.05 ether);
         vm.prank(bob);
-        monstr.mint{value: 5 ether}();
+        giga.mint{value: 5 ether}();
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             4.95 ether,
-            "Bob should have 4.95 MONSTR"
+            "Bob should have 4.95 GIGA"
         );
 
         // Move past minting period
         skipPastMintingPeriod();
 
         // Generate fees via transfer on day 8
-        uint256 aliceBalanceBefore = monstr.balanceOf(alice);
-        uint256 bobBalanceBefore = monstr.balanceOf(bob);
+        uint256 aliceBalanceBefore = giga.balanceOf(alice);
+        uint256 bobBalanceBefore = giga.balanceOf(bob);
         vm.prank(alice);
-        bool success = monstr.transfer(bob, 1 ether);
+        bool success = giga.transfer(bob, 1 ether);
         assertTrue(success, "Transfer should succeed");
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             aliceBalanceBefore - 1 ether,
             "Alice balance should decrease by 1"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             bobBalanceBefore + 0.99 ether,
             "Bob should receive 0.99 (1 - 0.01 fee)"
         );
@@ -56,14 +56,14 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Execute lottery
         // We're executing on day 9 for day 8's fees
         // Day 8 is even and after minting period, so fees split 50/50
-        // Transfer fee was 10 MONSTR, so 5 to lottery, 5 to auction
+        // Transfer fee was 10 GIGA, so 5 to lottery, 5 to auction
         vm.expectEmit(false, false, false, false);
         emit LotteryWon(address(0), 0, 0); // Don't know exact winner due to randomness
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify lottery was executed for the correct day
-        uint256 currentDay = monstr.getCurrentDay();
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(
+        uint256 currentDay = giga.getCurrentDay();
+        (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(
             (currentDay - 1) % 7
         );
 
@@ -75,7 +75,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         assertEq(
             amount,
             0.005 ether,
-            "Prize amount should be 0.005 MONSTR (50% of 0.01 fee)"
+            "Prize amount should be 0.005 GIGA (50% of 0.01 fee)"
         );
     }
 
@@ -87,15 +87,15 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        bool success1 = monstr.transfer(bob, 0.1 ether);
+        bool success1 = giga.transfer(bob, 0.1 ether);
         assertTrue(success1, "Transfer should succeed");
-        // Fee: 1 MONSTR
+        // Fee: 1 GIGA
 
         vm.prank(bob);
-        bool success2 = monstr.transfer(charlie, 0.1 ether);
+        bool success2 = giga.transfer(charlie, 0.1 ether);
         assertTrue(success2, "Transfer should succeed");
-        // Fee: 1 MONSTR
-        // Total transfer fees: 2 MONSTR
+        // Fee: 1 GIGA
+        // Total transfer fees: 2 GIGA
 
         // Move to day 9 and execute lottery for day 8's fees
         vm.warp(block.timestamp + 25 hours + 61);
@@ -103,11 +103,11 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Set prevrandao
         vm.prevrandao(bytes32(uint256(789012)));
 
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Check that we have a winner
-        uint256 currentDay = monstr.getCurrentDay();
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(
+        uint256 currentDay = giga.getCurrentDay();
+        (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(
             (currentDay - 1) % 7
         );
 
@@ -124,13 +124,13 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Set up holders with different balances
         vm.prank(alice);
-        monstr.mint{value: 10 ether}(); // Alice: 9.9 tokens
+        giga.mint{value: 10 ether}(); // Alice: 9.9 tokens
 
         vm.prank(bob);
-        monstr.mint{value: 5 ether}(); // Bob: 4.95 tokens
+        giga.mint{value: 5 ether}(); // Bob: 4.95 tokens
 
         vm.prank(charlie);
-        monstr.mint{value: 2 ether}(); // Charlie: 1.98 tokens
+        giga.mint{value: 2 ether}(); // Charlie: 1.98 tokens
 
         // Track wins
         uint256 aliceWins;
@@ -142,15 +142,15 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         for (uint256 i = 0; i < rounds; i++) {
             // Generate some fees via transfer
-            if (i % 3 == 0 && monstr.balanceOf(alice) > 0.1 ether) {
+            if (i % 3 == 0 && giga.balanceOf(alice) > 0.1 ether) {
                 vm.prank(alice);
-                monstr.transfer(bob, 0.1 ether);
-            } else if (i % 3 == 1 && monstr.balanceOf(bob) > 0.1 ether) {
+                giga.transfer(bob, 0.1 ether);
+            } else if (i % 3 == 1 && giga.balanceOf(bob) > 0.1 ether) {
                 vm.prank(bob);
-                monstr.transfer(charlie, 0.1 ether);
-            } else if (monstr.balanceOf(charlie) > 0.1 ether) {
+                giga.transfer(charlie, 0.1 ether);
+            } else if (giga.balanceOf(charlie) > 0.1 ether) {
                 vm.prank(charlie);
-                monstr.transfer(alice, 0.1 ether);
+                giga.transfer(alice, 0.1 ether);
             }
 
             // Move to next day
@@ -160,14 +160,14 @@ contract StrategyLotteryTest is StrategyTestBase {
             vm.prevrandao(bytes32(uint256(keccak256(abi.encode(i, "test")))));
 
             // Execute lottery
-            monstr.executeLottery();
+            giga.executeLottery();
 
-            uint256 currentDay = monstr.getCurrentDay();
+            uint256 currentDay = giga.getCurrentDay();
 
             // Check if there's a winner for the previous day
             // unclaimedPrizes is a 7-slot array, use modulo to avoid out of bounds
             uint256 prizeDay = (currentDay - 1) % 7;
-            (address winner, ) = monstr.lotteryUnclaimedPrizes(prizeDay);
+            (address winner, ) = giga.lotteryUnclaimedPrizes(prizeDay);
 
             if (winner == alice) aliceWins++;
             else if (winner == bob) bobWins++;
@@ -191,7 +191,7 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        monstr.transfer(bob, 0.1 ether);
+        giga.transfer(bob, 0.1 ether);
 
         // Move to day 9
         vm.warp(block.timestamp + 25 hours + 61);
@@ -201,16 +201,16 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Any external function should trigger lottery execution
         // Test with a simple balanceOf call
-        uint256 balance = monstr.balanceOf(alice);
+        uint256 balance = giga.balanceOf(alice);
         assertTrue(balance > 0, "Alice should have balance");
 
         // Day 8 is even (auction), day 9 is odd (lottery)
         // Check for the appropriate day based on what was executed
-        (address winner8, ) = monstr.lotteryUnclaimedPrizes(8 % 7);
-        (address winner9, ) = monstr.lotteryUnclaimedPrizes(9 % 7);
+        (address winner8, ) = giga.lotteryUnclaimedPrizes(8 % 7);
+        (address winner9, ) = giga.lotteryUnclaimedPrizes(9 % 7);
 
         // Check for lottery or auction execution
-        (, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , , uint112 auctionAmount, ) = giga.currentAuction();
 
         // Should have executed lottery on a day or started an auction
         assertTrue(
@@ -227,30 +227,30 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Generate fees
         vm.prank(alice);
-        monstr.transfer(bob, 0.1 ether);
+        giga.transfer(bob, 0.1 ether);
 
         // Move to day 9
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Take snapshot by executing lottery
         vm.prevrandao(bytes32(uint256(123)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get the winner
-        uint256 currentDay = monstr.getCurrentDay();
-        (address winner1, ) = monstr.lotteryUnclaimedPrizes(
+        uint256 currentDay = giga.getCurrentDay();
+        (address winner1, ) = giga.lotteryUnclaimedPrizes(
             (currentDay - 1) % 7
         );
 
         // Now move to next day and generate more fees
         vm.prank(bob);
-        monstr.transfer(charlie, 0.1 ether);
+        giga.transfer(charlie, 0.1 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Execute next lottery
         vm.prevrandao(bytes32(uint256(456)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Winners should be based on balances at snapshot time
         assertTrue(
@@ -265,29 +265,29 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Add more holders
         vm.prank(david);
-        monstr.mint{value: 3 ether}();
+        giga.mint{value: 3 ether}();
 
         // Move past minting period
         skipPastMintingPeriod();
 
         // Complex transfers
         vm.prank(alice);
-        monstr.transfer(eve, 0.5 ether);
+        giga.transfer(eve, 0.5 ether);
 
         vm.prank(bob);
-        monstr.transfer(alice, 0.3 ether);
+        giga.transfer(alice, 0.3 ether);
 
         vm.prank(charlie);
-        monstr.transfer(david, 0.1 ether);
+        giga.transfer(david, 0.1 ether);
 
         // Execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(999)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify lottery executed correctly
-        uint256 currentDay = monstr.getCurrentDay();
-        (address winner, ) = monstr.lotteryUnclaimedPrizes(
+        uint256 currentDay = giga.getCurrentDay();
+        (address winner, ) = giga.lotteryUnclaimedPrizes(
             (currentDay - 1) % 7
         );
 
@@ -302,27 +302,27 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // First lottery cycle
         vm.prank(alice);
-        monstr.transfer(bob, 0.1 ether);
+        giga.transfer(bob, 0.1 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(111)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        uint256 day1 = monstr.getCurrentDay() - 1;
-        (address winner1, uint112 amount1) = monstr.lotteryUnclaimedPrizes(
+        uint256 day1 = giga.getCurrentDay() - 1;
+        (address winner1, uint112 amount1) = giga.lotteryUnclaimedPrizes(
             day1 % 7
         );
 
         // Second lottery cycle
         vm.prank(bob);
-        monstr.transfer(charlie, 0.2 ether);
+        giga.transfer(charlie, 0.2 ether);
 
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(222)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        uint256 day2 = monstr.getCurrentDay() - 1;
-        (address winner2, uint112 amount2) = monstr.lotteryUnclaimedPrizes(
+        uint256 day2 = giga.getCurrentDay() - 1;
+        (address winner2, uint112 amount2) = giga.lotteryUnclaimedPrizes(
             day2 % 7
         );
 
@@ -336,26 +336,26 @@ contract StrategyLotteryTest is StrategyTestBase {
     function testDay0FeesDistributedOnDay1() public {
         // Mint during day 0 (first day of minting period)
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 5 ether}();
+        giga.mint{value: 5 ether}();
 
-        // Fees during minting: 10 MON * 1:1 * 0.01 = 0.1 tokens fee from alice
-        // 5 MON * 1:1 * 0.01 = 0.05 tokens fee from bob
+        // Fees during minting: 10 native * 1:1 * 0.01 = 0.1 tokens fee from alice
+        // 5 native * 1:1 * 0.01 = 0.05 tokens fee from bob
         // Total day 0 fees: 0.15 tokens
 
         // Transfer on day 0 to generate more fees
         vm.prank(alice);
-        monstr.transfer(bob, 0.1 ether); // 0.001 token fee
+        giga.transfer(bob, 0.1 ether); // 0.001 token fee
 
         // Move to day 1 and execute lottery
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Check that day 0 fees were distributed
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(0);
+        (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
         // Day 0 fees: 0.151 tokens total
@@ -371,19 +371,19 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Generate fees on day 8
         vm.prank(alice);
-        monstr.transfer(bob, 0.1 ether);
+        giga.transfer(bob, 0.1 ether);
 
         // Skip to day 13 without triggering
         vm.warp(block.timestamp + 5 * 25 hours);
 
         // Now trigger lottery with prevrandao
         vm.prevrandao(bytes32(uint256(789)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Check multiple days as lottery/auction alternate
         bool hasWinner = false;
         for (uint256 day = 8; day <= 13; day++) {
-            (address winner, ) = monstr.lotteryUnclaimedPrizes(day % 7);
+            (address winner, ) = giga.lotteryUnclaimedPrizes(day % 7);
             if (winner != address(0)) {
                 hasWinner = true;
                 break;
@@ -391,7 +391,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         }
 
         // Or check if auction has the fees
-        (, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (, , , uint112 auctionAmount, ) = giga.currentAuction();
 
         assertTrue(
             hasWinner || auctionAmount > 0,
@@ -402,30 +402,30 @@ contract StrategyLotteryTest is StrategyTestBase {
     function testNoLotteryWhenNoFeesCollected() public {
         // Create minimal setup to avoid fees during minting
         vm.prank(alice);
-        monstr.mint{value: 0.1 ether}();
+        giga.mint{value: 0.1 ether}();
 
         // Move way past minting period
         vm.warp(block.timestamp + 20 days);
 
         // Try to execute any pending lotteries/auctions from old fees
         // This might revert if there are insufficient fees
-        try monstr.executeLottery() {} catch {}
+        try giga.executeLottery() {} catch {}
 
         // Now we're on day 20, move to day 21 without any transfers (no fees)
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Try to execute lottery for day 20 (which had no fees)
         // This might revert with "Insufficient fees to distribute"
-        try monstr.executeLottery() {} catch {}
+        try giga.executeLottery() {} catch {}
 
         // Check unclaimed prizes for recent days - should be no new winners
-        uint256 currentDay = monstr.getCurrentDay();
+        uint256 currentDay = giga.getCurrentDay();
         bool hasRecentWinner = false;
 
         // Check last few slots (remember it's a 14-slot circular buffer)
         for (uint256 i = 0; i < 3; i++) {
             uint256 checkDay = ((currentDay - 1 - i) % 14);
-            (address winner, ) = monstr.lotteryUnclaimedPrizes(checkDay);
+            (address winner, ) = giga.lotteryUnclaimedPrizes(checkDay);
             if (winner != address(0)) {
                 // This might be an old winner from before day 20
                 // Can't definitively test this without more complex state tracking
@@ -445,10 +445,10 @@ contract StrategyLotteryTest is StrategyTestBase {
 
         // Generate significant fees on day 8
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether); // 0.01 token fee
+        giga.transfer(bob, 1 ether); // 0.01 token fee
 
         vm.prank(bob);
-        monstr.transfer(charlie, 0.5 ether); // 0.005 token fee
+        giga.transfer(charlie, 0.5 ether); // 0.005 token fee
 
         // Total fees: 0.015 tokens
         // After minting period, alternates between lottery and auction
@@ -457,12 +457,12 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Move to day 9 and execute
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(123456)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Day 8 is even (auction day), check if auction or lottery executed
         // After minting period, days alternate between lottery and auction
         // Check current auction to see if it has the fees
-        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
 
         // Should have auction with the fees
         assertGt(auctionAmount, 0, "Should have auction amount");
@@ -473,7 +473,7 @@ contract StrategyLotteryTest is StrategyTestBase {
         );
 
         // Verify LOT_POOL received the funds
-        uint256 lotPoolBalance = monstr.balanceOf(monstr.LOT_POOL());
+        uint256 lotPoolBalance = giga.balanceOf(giga.LOT_POOL());
         assertGe(
             lotPoolBalance,
             0.0075 ether,
@@ -490,24 +490,24 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Generate fees on day 9 (odd day = lottery day)
         vm.warp(block.timestamp + 25 hours);
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Execute lottery on day 10 for day 9's fees
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(12345)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Get winner info for day 9
-        (address winner, uint112 amount) = monstr.lotteryUnclaimedPrizes(9 % 7);
+        (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(9 % 7);
 
         if (winner != address(0)) {
             // Winner claims prize
-            uint256 winnerBalanceBefore = monstr.balanceOf(winner);
+            uint256 winnerBalanceBefore = giga.balanceOf(winner);
 
             vm.prank(winner);
-            monstr.claim();
+            giga.claim();
 
-            uint256 winnerBalanceAfter = monstr.balanceOf(winner);
+            uint256 winnerBalanceAfter = giga.balanceOf(winner);
 
             // Verify prize was transferred
             assertEq(
@@ -517,7 +517,7 @@ contract StrategyLotteryTest is StrategyTestBase {
             );
 
             // Verify prize is marked as claimed
-            (address winnerAfterClaim, uint112 amountAfterClaim) = monstr
+            (address winnerAfterClaim, uint112 amountAfterClaim) = giga
                 .lotteryUnclaimedPrizes(9 % 7);
             assertEq(
                 winnerAfterClaim,
@@ -537,24 +537,24 @@ contract StrategyLotteryTest is StrategyTestBase {
     }
 
     function testNoContractsInLottery() public {
-        // Deploy a contract that holds MONSTR
+        // Deploy a contract that holds GIGA
         MockContract mockContract = new MockContract();
         vm.deal(address(mockContract), 10 ether);
 
-        // Contract mints MONSTR
-        mockContract.mintStrategy(monstr);
+        // Contract mints GIGA
+        mockContract.mintStrategy(giga);
 
         // Check contract is not tracked as holder
-        assertFalse(monstr.isHolder(address(mockContract)));
-        assertEq(monstr.getHolderCount(), 0);
+        assertFalse(giga.isHolder(address(mockContract)));
+        assertEq(giga.getHolderCount(), 0);
 
         // Regular user mints
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
         // Only alice should be tracked
-        assertEq(monstr.getHolderCount(), 1);
-        assertTrue(monstr.isHolder(alice));
+        assertEq(giga.getHolderCount(), 1);
+        assertTrue(giga.isHolder(alice));
     }
 
     function testLotteryWithManyUsersRandomOperations() public {
@@ -567,7 +567,7 @@ contract StrategyLotteryTest is StrategyTestBase {
             // Each user mints different amount
             uint256 mintAmount = ((i % 3) + 1) * 0.5 ether;
             vm.prank(user);
-            monstr.mint{value: mintAmount}();
+            giga.mint{value: mintAmount}();
         }
 
         // Move past minting period
@@ -581,23 +581,23 @@ contract StrategyLotteryTest is StrategyTestBase {
             address from = address(uint160(0x1000 + (i % userCount)));
             address to = address(uint160(0x1000 + ((i + 3) % userCount)));
 
-            uint256 balance = monstr.balanceOf(from);
+            uint256 balance = giga.balanceOf(from);
             if (balance > 0.1 ether) {
                 vm.prank(from);
-                monstr.transfer(to, 0.1 ether);
+                giga.transfer(to, 0.1 ether);
             }
         }
 
         // Day 10: Execute lottery for day 9
         vm.warp(block.timestamp + 25 hours + 61);
         vm.prevrandao(bytes32(uint256(987654)));
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Verify lottery or auction executed
-        (address winner, uint112 prizeAmount) = monstr.lotteryUnclaimedPrizes(
+        (address winner, uint112 prizeAmount) = giga.lotteryUnclaimedPrizes(
             9 % 7
         );
-        (address bidder, , , uint112 auctionAmount, ) = monstr.currentAuction();
+        (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
 
         // Should have either lottery or auction
         assertTrue(

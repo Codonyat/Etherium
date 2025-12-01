@@ -2,10 +2,10 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMON} from "../src/Strategy.sol";
+import {Strategy, IWMEGA} from "../src/Strategy.sol";
 
-// Mock WMON for testing
-contract MockWMON {
+// Mock WMEGA for testing
+contract MockWMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -17,7 +17,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MON transfer failed");
+        require(success, "MEGA transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -56,8 +56,8 @@ contract MockWMON {
 }
 
 contract StrategyMaxSupplyOrderTest is Test {
-    Strategy public monstr;
-    MockWMON public wmon;
+    Strategy public giga;
+    MockWMEGA public wmega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -71,8 +71,8 @@ contract StrategyMaxSupplyOrderTest is Test {
     );
 
     function setUp() public {
-        wmon = new MockWMON();
-        monstr = new Strategy(address(wmon));
+        wmega = new MockWMEGA();
+        giga = new Strategy(address(wmega));
 
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -82,38 +82,38 @@ contract StrategyMaxSupplyOrderTest is Test {
     function testMaxSupplySetBeforeBurns() public {
         // During minting period, create holders
         vm.prank(alice);
-        monstr.mint{value: 50 ether}();
+        giga.mint{value: 50 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 30 ether}();
+        giga.mint{value: 30 ether}();
 
         vm.prank(charlie);
-        monstr.mint{value: 20 ether}();
+        giga.mint{value: 20 ether}();
 
-        // Total supply after minting: 100 MON * 1:1 = 100 MONSTR (99 to users + 1 fees)
-        uint256 totalSupplyAtEndOfMinting = monstr.totalSupply();
+        // Total supply after minting: 100 MEGA * 1:1 = 100 GIGA (99 to users + 1 fees)
+        uint256 totalSupplyAtEndOfMinting = giga.totalSupply();
         assertEq(
             totalSupplyAtEndOfMinting,
             100 ether,
-            "Total supply should be 100 MONSTR"
+            "Total supply should be 100 GIGA"
         );
 
         // Move past minting period
-        vm.warp(monstr.mintingEndTime() + 1);
+        vm.warp(giga.mintingEndTime() + 1);
 
         // Verify max supply not yet set
-        assertEq(monstr.maxSupplyEver(), 0, "Max supply not yet set");
+        assertEq(giga.maxSupplyEver(), 0, "Max supply not yet set");
 
         // The first transaction after minting period will set max supply
         // This happens BEFORE any lottery execution or potential burns
-        uint256 totalSupplyBeforeFirstTx = monstr.totalSupply();
+        uint256 totalSupplyBeforeFirstTx = giga.totalSupply();
 
         // First transaction after minting period - a simple transfer
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Max supply should now be set to the total supply BEFORE the transfer
-        uint256 maxSupplyEver = monstr.maxSupplyEver();
+        uint256 maxSupplyEver = giga.maxSupplyEver();
         assertEq(
             maxSupplyEver,
             totalSupplyBeforeFirstTx,
@@ -122,12 +122,12 @@ contract StrategyMaxSupplyOrderTest is Test {
         assertEq(
             maxSupplyEver,
             100 ether,
-            "Max supply should be 100 MONSTR"
+            "Max supply should be 100 GIGA"
         );
 
         // Current supply is actually MORE than max due to transfer fee being added to FEES_POOL
         // After minting period, fees are taken from sender, not minted
-        uint256 currentSupply = monstr.totalSupply();
+        uint256 currentSupply = giga.totalSupply();
         assertEq(
             currentSupply,
             maxSupplyEver,
@@ -136,10 +136,10 @@ contract StrategyMaxSupplyOrderTest is Test {
 
         // Verify max supply never changes
         vm.prank(bob);
-        monstr.transfer(charlie, 2 ether);
+        giga.transfer(charlie, 2 ether);
 
         assertEq(
-            monstr.maxSupplyEver(),
+            giga.maxSupplyEver(),
             maxSupplyEver,
             "Max supply should never change once set"
         );
@@ -148,55 +148,55 @@ contract StrategyMaxSupplyOrderTest is Test {
     function testMaxSupplyWithImmediateBeneficiaryBurn() public {
         // Setup: Create holders and ensure we'll have an unclaimed prize
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Day 0: Generate fees
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Day 1: Execute lottery to create a winner
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Don't let winner claim - let it sit for 7 days
         // Generate fees each day to keep lottery going
         for (uint256 i = 0; i < 7; i++) {
             vm.prank(bob);
-            monstr.transfer(alice, 0.1 ether);
+            giga.transfer(alice, 0.1 ether);
 
             vm.warp(block.timestamp + 25 hours + 61);
 
             // Skip executing lottery until we're past minting period
-            if (block.timestamp <= monstr.mintingEndTime()) {
-                monstr.executeLottery();
+            if (block.timestamp <= giga.mintingEndTime()) {
+                giga.executeLottery();
             }
         }
 
         // Now we're past minting period with an unclaimed prize
         assertTrue(
-            block.timestamp > monstr.mintingEndTime(),
+            block.timestamp > giga.mintingEndTime(),
             "Should be past minting period"
         );
 
         // Generate one more fee
         vm.prank(alice);
-        monstr.transfer(bob, 0.2 ether);
+        giga.transfer(bob, 0.2 ether);
 
-        uint256 totalSupplyBefore = monstr.totalSupply();
+        uint256 totalSupplyBefore = giga.totalSupply();
         // Max supply might already be set by the transfer above since we're past minting period
-        uint256 maxSupplyBefore = monstr.maxSupplyEver();
+        uint256 maxSupplyBefore = giga.maxSupplyEver();
 
         // The next lottery execution will:
         // 1. Check and set max supply (happens FIRST now)
         // 2. Try to send unclaimed prize to public goods (might burn tokens)
         vm.warp(block.timestamp + 25 hours + 61);
-        monstr.executeLottery();
+        giga.executeLottery();
 
-        uint256 maxSupply = monstr.maxSupplyEver();
-        uint256 totalSupplyAfter = monstr.totalSupply();
+        uint256 maxSupply = giga.maxSupplyEver();
+        uint256 totalSupplyAfter = giga.totalSupply();
 
         // Max supply should be set and not change
         assertTrue(maxSupply > 0, "Max supply should be set");
@@ -225,21 +225,21 @@ contract StrategyMaxSupplyOrderTest is Test {
     function testTransferTriggersMaxSupplyBeforeLottery() public {
         // Setup during minting period
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Move just past minting period
-        vm.warp(monstr.mintingEndTime() + 1);
+        vm.warp(giga.mintingEndTime() + 1);
 
-        assertEq(monstr.maxSupplyEver(), 0, "Max supply not yet set");
+        assertEq(giga.maxSupplyEver(), 0, "Max supply not yet set");
 
         // A simple transfer should set max supply before executing lottery
-        uint256 totalSupplyBefore = monstr.totalSupply();
+        uint256 totalSupplyBefore = giga.totalSupply();
 
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         // Max supply should now be set
-        uint256 maxSupply = monstr.maxSupplyEver();
+        uint256 maxSupply = giga.maxSupplyEver();
         assertEq(
             maxSupply,
             totalSupplyBefore,
@@ -247,6 +247,6 @@ contract StrategyMaxSupplyOrderTest is Test {
         );
 
         // And it should equal the total supply before the transfer's fee
-        assertEq(maxSupply, 10 ether, "Max supply should be 10 MONSTR");
+        assertEq(maxSupply, 10 ether, "Max supply should be 10 GIGA");
     }
 }

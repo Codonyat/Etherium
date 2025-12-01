@@ -6,10 +6,12 @@ import {MockERC20} from "../src/MockERC20.sol";
 
 /** @dev deployment:
     With Ledger:
-    forge script script/DeployMockERC20.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --ledger --hd-paths $HD_PATH
+    forge script script/DeployMockERC20.s.sol --rpc-url mega_testnet_alchemy --broadcast --ledger --hd-paths $HD_PATH \
+    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei
 
     With Private Key:
-    forge script script/DeployMockERC20.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --private-key $PRIVATE_KEY
+    forge script script/DeployMockERC20.s.sol --rpc-url mega_testnet_alchemy --broadcast --private-key $PRIVATE_KEY \
+    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei
 */
 contract DeployMockERC20Script is Script {
     function run() public {
@@ -23,7 +25,7 @@ contract DeployMockERC20Script is Script {
             "Mock Token",
             "MOCK",
             deployer,
-            1000 * 10**18
+            1000 * 10 ** 18
         );
 
         console.log("MockERC20 deployed at:", address(mockToken));

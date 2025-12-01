@@ -2,26 +2,26 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMON} from "../src/Strategy.sol";
+import {Strategy, IWMEGA} from "../src/Strategy.sol";
 
 // Malicious contract that mints in constructor to bypass exclusion
 contract ConstructorMinter {
-    Strategy public monstr;
+    Strategy public giga;
     
-    constructor(Strategy _monstr) payable {
-        monstr = _monstr;
+    constructor(Strategy _giga) payable {
+        giga = _giga;
         // During constructor, code.length == 0, so we bypass contract exclusion
         if (msg.value > 0) {
-            monstr.mint{value: msg.value}();
+            giga.mint{value: msg.value}();
         }
     }
-    
+
     function transfer(address to, uint256 amount) external {
-        monstr.transfer(to, amount);
+        giga.transfer(to, amount);
     }
-    
+
     function getBalance() external view returns (uint256) {
-        return monstr.balanceOf(address(this));
+        return giga.balanceOf(address(this));
     }
 }
 
@@ -44,8 +44,8 @@ contract Create2Deployer {
     }
 }
 
-// Mock WMON for testing
-contract MockWMON {
+// Mock WMEGA for testing
+contract MockWMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -57,7 +57,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success,) = msg.sender.call{value: amount}("");
-        require(success, "MON transfer failed");
+        require(success, "MEGA transfer failed");
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
@@ -89,16 +89,16 @@ contract MockWMON {
 }
 
 contract StrategyFenwickCorruptionTest is Test {
-    Strategy public monstr;
-    MockWMON public wmon;
+    Strategy public giga;
+    MockWMEGA public wmega;
     Create2Deployer public deployer;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
 
     function setUp() public {
-        wmon = new MockWMON();
-        monstr = new Strategy(address(wmon));
+        wmega = new MockWMEGA();
+        giga = new Strategy(address(wmega));
         deployer = new Create2Deployer();
         
         vm.deal(alice, 100 ether);
@@ -108,7 +108,7 @@ contract StrategyFenwickCorruptionTest is Test {
     function testConstructorBypassPrevented() public {
         // Deploy malicious contract that mints in constructor
         vm.deal(address(this), 10 ether);
-        ConstructorMinter malicious = new ConstructorMinter{value: 10 ether}(monstr);
+        ConstructorMinter malicious = new ConstructorMinter{value: 10 ether}(giga);
         
         // The contract should have tokens
         uint256 contractBalance = malicious.getBalance();
@@ -116,18 +116,18 @@ contract StrategyFenwickCorruptionTest is Test {
         console.log("Contract balance:", contractBalance);
         
         // Check if contract is in holder list (it might be due to constructor bypass)
-        uint256 holderCount = monstr.getHolderCount();
+        uint256 holderCount = giga.getHolderCount();
         console.log("Holder count after constructor mint:", holderCount);
         
         // Now the contract transfers tokens - this should update Fenwick tree properly
         // With the fix, the tree should be updated even though it's a contract
-        uint256 initialFenwick = monstr.getSuffixSum(1);
+        uint256 initialFenwick = giga.getSuffixSum(1);
         console.log("Initial Fenwick sum:", initialFenwick);
         
         // Contract transfers some tokens
         malicious.transfer(alice, 1 ether);
 
-        uint256 afterTransferFenwick = monstr.getSuffixSum(1);
+        uint256 afterTransferFenwick = giga.getSuffixSum(1);
         console.log("Fenwick sum after transfer:", afterTransferFenwick);
 
         // The Fenwick tree should be properly updated
@@ -143,18 +143,18 @@ contract StrategyFenwickCorruptionTest is Test {
         malicious.transfer(bob, remainingBalance);
         
         // After transferring all, contract should be removed from holders
-        uint256 finalFenwick = monstr.getSuffixSum(1);
+        uint256 finalFenwick = giga.getSuffixSum(1);
         console.log("Final Fenwick sum:", finalFenwick);
         
         // Fenwick should only track Alice and Bob now
-        uint256 expectedTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
+        uint256 expectedTotal = giga.balanceOf(alice) + giga.balanceOf(bob);
         assertEq(finalFenwick, expectedTotal, "Fenwick should only track EOA balances");
     }
     
     function testCreate2PrefundingAttackPrevented() public {
         // Compute the CREATE2 address for a future contract
         bytes memory bytecode = type(ConstructorMinter).creationCode;
-        bytes memory constructorArgs = abi.encode(address(monstr));
+        bytes memory constructorArgs = abi.encode(address(giga));
         bytes memory fullBytecode = abi.encodePacked(bytecode, constructorArgs);
         bytes32 salt = keccak256("test");
         
@@ -163,18 +163,18 @@ contract StrategyFenwickCorruptionTest is Test {
         
         // Alice mints tokens
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Alice sends tokens to the future contract address (before deployment)
         vm.prank(alice);
-        monstr.transfer(futureContract, 5 ether);
+        giga.transfer(futureContract, 5 ether);
         
         // The future address should be in the Fenwick tree as an EOA
-        uint256 holderCountBefore = monstr.getHolderCount();
+        uint256 holderCountBefore = giga.getHolderCount();
         console.log("Holder count before deployment:", holderCountBefore);
         
         // Check Fenwick tree includes the future contract
-        uint256 fenwickBefore = monstr.getSuffixSum(1);
+        uint256 fenwickBefore = giga.getSuffixSum(1);
         console.log("Fenwick sum before deployment:", fenwickBefore);
         
         // Now deploy the contract at that address
@@ -191,7 +191,7 @@ contract StrategyFenwickCorruptionTest is Test {
         // With the fix, when the contract transfers tokens, Fenwick should update
         deployedContract.transfer(bob, 1 ether);
 
-        uint256 fenwickAfter = monstr.getSuffixSum(1);
+        uint256 fenwickAfter = giga.getSuffixSum(1);
         console.log("Fenwick sum after contract transfer:", fenwickAfter);
 
         // The deployed contract minted 4.95 tokens in its constructor, getting added to tree
@@ -206,43 +206,43 @@ contract StrategyFenwickCorruptionTest is Test {
         }
         
         // Final check - Fenwick should only track EOAs
-        uint256 finalFenwick = monstr.getSuffixSum(1);
-        uint256 expectedTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
+        uint256 finalFenwick = giga.getSuffixSum(1);
+        uint256 expectedTotal = giga.balanceOf(alice) + giga.balanceOf(bob);
         assertEq(finalFenwick, expectedTotal, "Final Fenwick should only track EOAs");
     }
     
     function testContractExclusionStillWorksNormally() public {
         // Normal case: deploy contract first, then try to mint
-        // First deploy with no MON in constructor
-        ConstructorMinter normalContract = new ConstructorMinter{value: 0}(monstr);
+        // First deploy with no native token in constructor
+        ConstructorMinter normalContract = new ConstructorMinter{value: 0}(giga);
         
         // Contract tries to mint after deployment (not in constructor)
         vm.deal(address(normalContract), 5 ether);
         vm.prank(address(normalContract));
-        monstr.mint{value: 5 ether}();
+        giga.mint{value: 5 ether}();
         
         // Contract should have tokens but NOT be in Fenwick tree
-        uint256 contractBalance = monstr.balanceOf(address(normalContract));
+        uint256 contractBalance = giga.balanceOf(address(normalContract));
         assertGt(contractBalance, 0, "Contract should have tokens");
         
         // Check holder count - contract should not be counted
-        uint256 holderCount = monstr.getHolderCount();
+        uint256 holderCount = giga.getHolderCount();
         assertEq(holderCount, 0, "No holders should be tracked (only contract has tokens)");
         
         // Fenwick tree should be empty
-        uint256 fenwickSum = monstr.getSuffixSum(1);
+        uint256 fenwickSum = giga.getSuffixSum(1);
         assertEq(fenwickSum, 0, "Fenwick should not track contract balance");
         
         // Even after transfers, contract should not enter Fenwick tree
         vm.prank(address(normalContract));
-        monstr.transfer(alice, 1 ether);
+        giga.transfer(alice, 1 ether);
         
         // Now Alice should be tracked
-        holderCount = monstr.getHolderCount();
+        holderCount = giga.getHolderCount();
         assertEq(holderCount, 1, "Only Alice should be tracked");
         
-        fenwickSum = monstr.getSuffixSum(1);
-        assertEq(fenwickSum, monstr.balanceOf(alice), "Fenwick should only track Alice");
+        fenwickSum = giga.getSuffixSum(1);
+        assertEq(fenwickSum, giga.balanceOf(alice), "Fenwick should only track Alice");
     }
     
     function testPhantomEntriesProperlyCleanedUp() public {
@@ -250,10 +250,10 @@ contract StrategyFenwickCorruptionTest is Test {
         vm.deal(address(this), 20 ether);
         
         // Deploy multiple malicious contracts that mint in constructor
-        ConstructorMinter mal1 = new ConstructorMinter{value: 5 ether}(monstr);
-        ConstructorMinter mal2 = new ConstructorMinter{value: 5 ether}(monstr);
+        ConstructorMinter mal1 = new ConstructorMinter{value: 5 ether}(giga);
+        ConstructorMinter mal2 = new ConstructorMinter{value: 5 ether}(giga);
         
-        uint256 initialHolderCount = monstr.getHolderCount();
+        uint256 initialHolderCount = giga.getHolderCount();
         console.log("Initial holder count:", initialHolderCount);
         
         // Both contracts transfer to create EOA holders
@@ -261,9 +261,9 @@ contract StrategyFenwickCorruptionTest is Test {
         mal2.transfer(bob, 2 ether);
         
         // Check Fenwick consistency
-        uint256 fenwickSum = monstr.getSuffixSum(1);
-        uint256 actualTotal = monstr.balanceOf(alice) + 
-                             monstr.balanceOf(bob) + 
+        uint256 fenwickSum = giga.getSuffixSum(1);
+        uint256 actualTotal = giga.balanceOf(alice) + 
+                             giga.balanceOf(bob) + 
                              mal1.getBalance() + 
                              mal2.getBalance();
         
@@ -278,12 +278,12 @@ contract StrategyFenwickCorruptionTest is Test {
         mal2.transfer(bob, mal2.getBalance());
         
         // Final state should only have EOAs
-        uint256 finalFenwick = monstr.getSuffixSum(1);
-        uint256 eoaTotal = monstr.balanceOf(alice) + monstr.balanceOf(bob);
+        uint256 finalFenwick = giga.getSuffixSum(1);
+        uint256 eoaTotal = giga.balanceOf(alice) + giga.balanceOf(bob);
         assertEq(finalFenwick, eoaTotal, "Final Fenwick should only track EOAs");
         
         // Holder count should reflect only EOAs
-        uint256 finalHolderCount = monstr.getHolderCount();
+        uint256 finalHolderCount = giga.getHolderCount();
         assertEq(finalHolderCount, 2, "Should only have 2 EOA holders");
     }
 }

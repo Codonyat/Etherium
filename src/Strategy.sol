@@ -5,7 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "./interfaces/IExternalTokens.sol";
 
-interface IWMON {
+interface IWMEGA {
     function deposit() external payable;
     function withdraw(uint256) external;
     function transfer(address, uint256) external returns (bool);
@@ -15,25 +15,25 @@ interface IWMON {
 }
 
 /**
- * @title MONSTR
- * @dev ERC20 token backed by MON with daily lottery and auction mechanics
- * - During minting period: 1 MON = 1 MONSTR (both 18 decimals)
- * - Redemption: Proportional share of contract's MON (MONSTR * MON balance / total supply)
+ * @title GigaETH
+ * @dev ERC20 token backed by MEGA with daily lottery and auction mechanics
+ * - During minting period: 1000 MEGA = 1 GIGA (MEGA 18 decimals, GIGA 21 decimals)
+ * - Redemption: Proportional share of contract's MEGA (GIGA * MEGA balance / total supply)
  * - 1% fee on mint/burn/transfer (split between lottery and auction pools)
  * - Daily lottery for random holder using prevrandao
- * - Daily auctions using WMON to prevent DoS attacks
+ * - Daily auctions using WMEGA to prevent DoS attacks
  * - Users can lock community tokens during minting period to mint without fees (optional)
  * - Efficient winner selection using Fenwick tree (Binary Indexed Tree)
  * - Uses transient storage for reentrancy guard (EIP-1153) for gas efficiency
  */
 contract Strategy is ERC20, ReentrancyGuardTransient {
-    // Conversion: 1 MON = 1 MONSTR during minting period (both 18 decimals)
-    uint256 public constant DECIMALS = 18;
+    // Conversion: 1000 MEGA = 1 GIGA (MEGA has 18 decimals, GIGA has 21 decimals)
+    uint256 public constant DECIMALS = 21;
     uint256 public constant FEE_PERCENT = 100; // 1% = 100 basis points
     uint256 public constant BASIS_POINTS = 10_000;
     uint256 public constant MINTING_PERIOD = 3 days;
     uint256 public constant COMMUNITY_TOKEN_LOCK_AMOUNT = 100e24;
-    uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 30 days; // 1 month from deployment
+    uint256 public constant COMMUNITY_TOKEN_UNLOCK_TIME = 1 days; // 1 month from deployment
 
     // Synthetic addresses for fee management
     address public constant FEES_POOL =
@@ -45,12 +45,12 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     uint256 public immutable mintingEndTime;
 
     // Packed storage slot: 112 + 32 + 8 = 152 bits (fits in one 256-bit slot)
-    uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion MONSTR with 18 decimals)
+    uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion GIGA with 18 decimals)
     uint32 public lastLotteryDay; // Day counter (sufficient for ~11.7 million years)
     uint8 public currentBeneficiaryIndex; // Index in BENEFICIARIES array (max 255 addresses)
 
     uint256 public constant TIME_GAP = 1 minutes; // Must be 1 minute into new day before lottery can execute
-    uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 MONSTR) to run lottery/auction
+    uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 GIGA) to run lottery/auction
 
     // Cyclical arrays for unclaimed prizes (7 slots each)
     // Separate arrays for lottery and auction to prevent slot conflicts
@@ -59,7 +59,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     // Packed struct: 160 + 112 = 272 bits (exceeds 256, uses 2 slots per prize)
     struct UnclaimedPrize {
         address winner; // 160 bits
-        uint112 amount; // 112 bits (MONSTR amount for prizes)
+        uint112 amount; // 112 bits (GIGA amount for prizes)
     }
 
     UnclaimedPrize[7] public lotteryUnclaimedPrizes;
@@ -99,24 +99,24 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     // Or set to your community token address before deployment
     IERC20 public constant COMMUNITY_TOKEN = IERC20(address(0));
 
-    // WMON integration for auctions
-    // Monad Mainnet WMON: 0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A
-    // Monad Testnet WMON: 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701
-    IWMON public immutable wmon;
+    // WMEGA integration for auctions
+    // MegaETH Testnet (chain id 6343) WMEGA: TBD
+    // MegaETH Mainnet WMEGA: TBD
+    IWMEGA public immutable wmega;
 
     // Track community tokens locked per user during minting period
     mapping(address user => uint256 amount) public communityTokenLocked;
 
     event Minted(
         address indexed to,
-        uint256 monAmount,
-        uint256 stratAmount,
+        uint256 nativeAmount,
+        uint256 tokenAmount,
         uint256 fee
     );
     event Redeemed(
         address indexed from,
-        uint256 stratAmount,
-        uint256 monAmount,
+        uint256 tokenAmount,
+        uint256 nativeAmount,
         uint256 fee
     );
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
@@ -135,13 +135,13 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     event CommunityTokenUnlocked(address indexed user, uint256 amount);
 
     // Auction events
-    event AuctionStarted(uint256 day, uint256 stratAmount, uint256 minBid);
+    event AuctionStarted(uint256 day, uint256 tokenAmount, uint256 minBid);
     event BidPlaced(address indexed bidder, uint256 amount, uint256 day);
     event BidRefunded(address indexed bidder, uint256 amount);
     event AuctionWon(
         address indexed winner,
-        uint256 stratAmount,
-        uint256 monPaid,
+        uint256 tokenAmount,
+        uint256 nativePaid,
         uint256 day
     );
 
@@ -149,21 +149,21 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     // Packed struct: 160 + 96 + 96 + 112 + 32 = 496 bits (uses 2 slots)
     struct Auction {
         address currentBidder; // 160 bits
-        uint96 currentBid; // 96 bits - WMON amount bid
-        uint96 minBid; // 96 bits - Minimum bid required (in WMON)
-        uint112 monstrAmount; // 112 bits - MONSTR amount being auctioned
+        uint96 currentBid; // 96 bits - WMEGA amount bid
+        uint96 minBid; // 96 bits - Minimum bid required (in WMEGA)
+        uint112 auctionTokens; // 112 bits - GIGA amount being auctioned
         uint32 auctionDay; // 32 bits - Day of the auction
     }
 
     Auction public currentAuction;
 
     /**
-     * @param _wmon Address of WMON token for auctions
+     * @param _wmega Address of WMEGA token for auctions
      */
-    constructor(address _wmon) ERC20("Monstr", "MONSTR") {
+    constructor(address _wmega) ERC20("GigaETH", "GIGA") {
         deploymentTime = block.timestamp;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
-        wmon = IWMON(_wmon);
+        wmega = IWMEGA(_wmega);
     }
 
     function decimals() public pure override returns (uint8) {
@@ -176,29 +176,29 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     function _checkAndSetMaxSupply() internal {
         if (maxSupplyEver == 0 && block.timestamp > mintingEndTime) {
             // Set max supply based on total supply at end of minting period
-            // 1:1 conversion - max supply equals total MONSTR minted
+            // 1:1 conversion - max supply equals total GIGA minted
             maxSupplyEver = uint112(totalSupply());
         }
     }
 
     /**
-     * @dev Accept MON from anyone - donations benefit all token holders proportionally
+     * @dev Accept MEGA from anyone - donations benefit all token holders proportionally
      */
     receive() external payable {
-        // Accept all MON transfers with no data
+        // Accept all MEGA transfers with no data
         // This allows:
-        // 1. WMON withdrawals for auctions
+        // 1. WMEGA withdrawals for auctions
         // 2. Community donations that increase backing value
         // 3. Failed beneficiary transfers to not revert
     }
 
     /**
-     * @dev Mint MONSTR by depositing MON (standard minting with fees)
-     * During minting period: 1 MON = 1 MONSTR
+     * @dev Mint GIGA by depositing MEGA (standard minting with fees)
+     * During minting period: 1000 MEGA = 1 GIGA (1:1 in base units)
      * After minting period: Can only mint up to available capacity
      */
     function mint() external payable nonReentrant {
-        require(msg.value > 0, "Must send MON");
+        require(msg.value > 0, "Must send MEGA");
 
         // Check and set max supply before any potential burns
         _checkAndSetMaxSupply();
@@ -206,53 +206,53 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Try to execute pending lottery/auction before changing state
         _tryExecuteLotteryAndAuction();
 
-        uint256 monstrToMint;
+        uint256 tokensToMint;
         uint256 fee;
-        uint256 netMONSTR;
+        uint256 netTokens;
 
         // Get balance before minting
         if (block.timestamp <= mintingEndTime) {
-            // During minting period: 1 MON = 1 MONSTR
-            monstrToMint = msg.value;
+            // During minting period: 1:1 in base units (1000 MEGA = 1 GIGA in display units)
+            tokensToMint = msg.value;
         } else {
-            // After minting period: proportional to MON/supply ratio
-            uint256 monBalance = address(this).balance - msg.value; // Exclude sent MON
-            if (totalSupply() > 0 && monBalance > 0) {
-                // Mint proportionally to maintain MON backing ratio
+            // After minting period: proportional to MEGA/supply ratio
+            uint256 megaBalance = address(this).balance - msg.value; // Exclude sent MEGA
+            if (totalSupply() > 0 && megaBalance > 0) {
+                // Mint proportionally to maintain MEGA backing ratio
                 // Overflow safety: msg.value, totalSupply < 100B * 1e18, msg.value * totalSupply < 2^2^256
-                monstrToMint = (msg.value * totalSupply()) / monBalance;
+                tokensToMint = (msg.value * totalSupply()) / megaBalance;
             } else {
-                // Fallback to 1:1 if no supply or MON
+                // Fallback to 1:1 if no supply or MEGA
                 // Overflow safety: msg.value < 2^96 (fits in uint256)
-                monstrToMint = msg.value;
+                tokensToMint = msg.value;
             }
 
             require(
-                totalSupply() + monstrToMint <= maxSupplyEver,
+                totalSupply() + tokensToMint <= maxSupplyEver,
                 "Max supply reached"
             );
-            require(monstrToMint >= 100, "Minimum mint amount is 100 wei");
+            require(tokensToMint >= 100, "Minimum mint amount is 100 wei");
         }
 
         // Calculate and apply fees (common to both minting periods)
-        fee = (monstrToMint * FEE_PERCENT) / BASIS_POINTS;
-        netMONSTR = monstrToMint - fee;
+        fee = (tokensToMint * FEE_PERCENT) / BASIS_POINTS;
+        netTokens = tokensToMint - fee;
 
         // Mint uses _atomicUpdate internally, so Fenwick tree is updated atomically
-        _mint(msg.sender, netMONSTR);
+        _mint(msg.sender, netTokens);
         if (fee > 0) {
             _mint(FEES_POOL, fee);
         }
 
         // No need for manual Fenwick update - handled atomically in _update
 
-        emit Minted(msg.sender, msg.value, netMONSTR, fee);
+        emit Minted(msg.sender, msg.value, netTokens, fee);
     }
 
     /**
-     * @dev Mint MONSTR fee-free by locking community tokens
+     * @dev Mint GIGA fee-free by locking community tokens
      * Each lock allows one fee-free mint
-     * 1 MON = 1 MONSTR (no fees deducted)
+     * 1000 MEGA = 1 GIGA (no fees deducted)
      * Disabled if COMMUNITY_TOKEN is address(0)
      */
     function mintFeeFree() external payable nonReentrant {
@@ -260,7 +260,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             address(COMMUNITY_TOKEN) != address(0),
             "Fee-free minting disabled"
         );
-        require(msg.value > 0, "Must send MON");
+        require(msg.value > 0, "Must send MEGA");
         require(
             block.timestamp <= mintingEndTime,
             "Fee-free minting only during minting period"
@@ -282,30 +282,30 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Track locked amount
         communityTokenLocked[msg.sender] += COMMUNITY_TOKEN_LOCK_AMOUNT;
 
-        // Mint without fees, 1 MON = 1 MONSTR during minting period
+        // Mint without fees, 1:1 in base units (1000 MEGA = 1 GIGA in display units)
         // Overflow safety: msg.value < 2^96 (fits in uint256)
-        uint256 monstrToMint = msg.value;
+        uint256 tokensToMint = msg.value;
 
         // After minting period: enforce max supply limit
         if (block.timestamp > mintingEndTime) {
             require(
-                totalSupply() + monstrToMint <= maxSupplyEver,
+                totalSupply() + tokensToMint <= maxSupplyEver,
                 "Max supply reached"
             );
         }
 
         // Mint full amount to user (no fees)
         // _mint uses _atomicUpdate internally, so Fenwick tree is updated atomically
-        _mint(msg.sender, monstrToMint);
+        _mint(msg.sender, tokensToMint);
 
         emit CommunityTokenLocked(
             msg.sender,
             COMMUNITY_TOKEN_LOCK_AMOUNT,
-            monstrToMint,
+            tokensToMint,
             deploymentTime + COMMUNITY_TOKEN_UNLOCK_TIME
         );
 
-        emit Minted(msg.sender, msg.value, monstrToMint, 0);
+        emit Minted(msg.sender, msg.value, tokensToMint, 0);
     }
 
     /**
@@ -342,8 +342,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     }
 
     /**
-     * @dev Redeem MONSTR for MON
-     * Returns proportional share of contract's MON balance (minus 1% fee)
+     * @dev Redeem GIGA for MEGA
+     * Returns proportional share of contract's MEGA balance (minus 1% fee)
      */
     function redeem(uint256 amount) external nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
@@ -356,10 +356,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         _tryExecuteLotteryAndAuction();
 
         uint256 fee = (amount * FEE_PERCENT) / BASIS_POINTS;
-        uint256 netMONSTR = amount - fee;
+        uint256 netTokens = amount - fee;
 
-        // Calculate proportional MON to return before state changes
-        uint256 monToReturn = (netMONSTR * address(this).balance) /
+        // Calculate proportional MEGA to return before state changes
+        uint256 megaToReturn = (netTokens * address(this).balance) /
             totalSupply();
 
         // Transfer fees atomically (Fenwick tree updated automatically)
@@ -368,13 +368,13 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         }
 
         // Burn the remainder from user atomically (Fenwick tree updated automatically)
-        _burn(msg.sender, netMONSTR);
+        _burn(msg.sender, netTokens);
 
-        // Transfer proportional MON back to user
-        (bool success, ) = msg.sender.call{value: monToReturn}("");
-        require(success, "MON transfer failed");
+        // Transfer proportional MEGA back to user
+        (bool success, ) = msg.sender.call{value: megaToReturn}("");
+        require(success, "MEGA transfer failed");
 
-        emit Redeemed(msg.sender, amount, monToReturn, fee);
+        emit Redeemed(msg.sender, amount, megaToReturn, fee);
     }
 
     /**
@@ -758,30 +758,30 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             // Check if this slot has an unclaimed lottery prize
             UnclaimedPrize storage prize = lotteryUnclaimedPrizes[slot];
             if (prize.amount > 0) {
-                // Try to redeem MONSTR for MON and send to beneficiary
+                // Try to redeem GIGA for MEGA and send to beneficiary
                 address beneficiary = BENEFICIARIES[currentBeneficiaryIndex];
                 currentBeneficiaryIndex = uint8(
                     (currentBeneficiaryIndex + 1) % BENEFICIARIES.length
                 );
 
-                // Calculate MON value of the MONSTR prize
-                // MON amount = (MONSTR amount * contract MON balance) / total supply
-                uint256 monToSend = (uint256(prize.amount) *
+                // Calculate MEGA value of the GIGA prize
+                // MEGA amount = (GIGA amount * contract MEGA balance) / total supply
+                uint256 megaToSend = (uint256(prize.amount) *
                     address(this).balance) / totalSupply();
 
-                // Attempt to send MON to beneficiary
-                (bool success, ) = beneficiary.call{value: monToSend}("");
+                // Attempt to send MEGA to beneficiary
+                (bool success, ) = beneficiary.call{value: megaToSend}("");
 
                 if (success) {
-                    // MON transfer successful, now burn the MONSTR tokens from lottery pool
+                    // MEGA transfer successful, now burn the GIGA tokens from lottery pool
                     _burn(LOT_POOL, prize.amount);
                     emit BeneficiaryFunded(
                         beneficiary,
-                        monToSend, // Emit the actual MON amount sent
+                        megaToSend, // Emit the actual MEGA amount sent
                         prize.winner
                     );
                 } else {
-                    // MON transfer failed, add unclaimed prize to current winner's prize
+                    // MEGA transfer failed, add unclaimed prize to current winner's prize
                     // The current winner will get both prizes when they claim
                     feesToDistribute += prize.amount;
                     // Note: We still cycle to the next beneficiary for fairness
@@ -790,7 +790,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
             // Store new prize in the slot (overwriting any previous data)
             prize.winner = winner;
-            prize.amount = uint112(feesToDistribute); // Store MONSTR amount as prize
+            prize.amount = uint112(feesToDistribute); // Store GIGA amount as prize
 
             emit LotteryWon(winner, feesToDistribute, lotteryDay);
         }
@@ -1041,8 +1041,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             _finalizeAuction();
         }
 
-        // Calculate minimum bid for the MONSTR amount being auctioned
-        // MinBid = (MON balance * feesToDistribute) / (2 * totalSupply)
+        // Calculate minimum bid for the GIGA amount being auctioned
+        // MinBid = (MEGA balance * feesToDistribute) / (2 * totalSupply)
         // This sets the minimum bid at 50% of the redemption value
         // Overflow safety: balance < 2^96, feesToDistribute < 2^112, product < 2^208
         uint256 minBid = (address(this).balance * feesToDistribute) /
@@ -1056,7 +1056,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             currentBidder: address(0),
             currentBid: 0,
             minBid: uint96(minBid),
-            monstrAmount: uint112(feesToDistribute),
+            auctionTokens: uint112(feesToDistribute),
             auctionDay: uint32(currentDay - 1) // Day whose fees we're auctioning
         });
 
@@ -1072,9 +1072,13 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
     function _finalizeAuction() internal {
         // If no bids, roll over the fees to the next day
         if (currentAuction.currentBidder == address(0)) {
-            if (currentAuction.monstrAmount > 0) {
+            if (currentAuction.auctionTokens > 0) {
                 // Add unclaimed auction amount back to fees pool for next distribution
-                _atomicUpdate(LOT_POOL, FEES_POOL, currentAuction.monstrAmount);
+                _atomicUpdate(
+                    LOT_POOL,
+                    FEES_POOL,
+                    currentAuction.auctionTokens
+                );
             }
             return;
         }
@@ -1090,33 +1094,33 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                 (currentBeneficiaryIndex + 1) % BENEFICIARIES.length
             );
 
-            // Calculate MON value of the MONSTR prize
-            // MON amount = (MONSTR amount * contract MON balance) / total supply
-            uint256 monToSend = (uint256(prize.amount) *
+            // Calculate MEGA value of the GIGA prize
+            // MEGA amount = (GIGA amount * contract MEGA balance) / total supply
+            uint256 megaToSend = (uint256(prize.amount) *
                 address(this).balance) / totalSupply();
 
-            (bool success, ) = beneficiary.call{value: monToSend}("");
+            (bool success, ) = beneficiary.call{value: megaToSend}("");
 
             if (success) {
                 _burn(LOT_POOL, prize.amount);
-                emit BeneficiaryFunded(beneficiary, monToSend, prize.winner); // Emit actual MON amount
+                emit BeneficiaryFunded(beneficiary, megaToSend, prize.winner); // Emit actual MEGA amount
             } else {
                 // Add to current winner's prize
-                currentAuction.monstrAmount += uint112(prize.amount);
+                currentAuction.auctionTokens += uint112(prize.amount);
             }
         }
 
-        // Convert WMON to MON for the winning bid
+        // Convert WMEGA to MEGA for the winning bid
         // This is safe because we control when this happens (no external call that could revert)
-        wmon.withdraw(currentAuction.currentBid);
+        wmega.withdraw(currentAuction.currentBid);
 
         // Store new prize
         prize.winner = currentAuction.currentBidder;
-        prize.amount = currentAuction.monstrAmount;
+        prize.amount = currentAuction.auctionTokens;
 
         emit AuctionWon(
             currentAuction.currentBidder,
-            currentAuction.monstrAmount,
+            currentAuction.auctionTokens,
             currentAuction.currentBid,
             currentAuction.auctionDay
         );
@@ -1124,18 +1128,18 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     /**
      * @dev Place a bid in the current auction
-     * The bidder must have approved WMON that is at least 10% higher than the current bid
-     * Winning bid gets the auctioned MONSTR tokens
-     * Previous bidder gets their WMON refunded immediately
+     * The bidder must have approved WMEGA that is at least 10% higher than the current bid
+     * Winning bid gets the auctioned GIGA tokens
+     * Previous bidder gets their WMEGA refunded immediately
      *
-     * Bidder can send MON as well which then gets wrapped in into WMON.
+     * Bidder can send MEGA as well which then gets wrapped in into WMEGA.
      *
      * We enforce a 10% minimum increment to make auctions more accessible to non-bot participants.
      * Since token prices rarely change by 10% in a single day, this creates a window where
      * early bidders can speculate on the value without being immediately outbid by bots
      * that might otherwise place marginally higher bids repeatedly.
      *
-     * Using WMON prevents griefing attacks where malicious bidders could block refunds
+     * Using WMEGA prevents griefing attacks where malicious bidders could block refunds
      * by reverting in their receive() function.
      */
     function bid(uint256 bidAmount) external payable nonReentrant {
@@ -1154,17 +1158,17 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             ? currentAuction.minBid // Use stored minimum for first bid
             : (currentAuction.currentBid * 110) / 100; // 10% increase for subsequent bids
 
-        // Handle native MON bidding
+        // Handle native MEGA bidding
         if (msg.value > 0) {
-            // Override bidAmount with msg.value for native MON
+            // Override bidAmount with msg.value for native MEGA
             bidAmount = msg.value;
-            // Wrap native MON to WMON
-            wmon.deposit{value: msg.value}();
+            // Wrap native MEGA to WMEGA
+            wmega.deposit{value: msg.value}();
         } else {
             // Transfer the bid to the contract
             require(
-                wmon.transferFrom(msg.sender, address(this), bidAmount),
-                "WMON transfer failed"
+                wmega.transferFrom(msg.sender, address(this), bidAmount),
+                "WMEGA transfer failed"
             );
         }
 
@@ -1180,11 +1184,11 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         emit BidPlaced(msg.sender, bidAmount, currentAuction.auctionDay);
 
-        // Refund previous bidder if exists (in WMON)
+        // Refund previous bidder if exists (in WMEGA)
         if (previousBidder != address(0)) {
             require(
-                wmon.transfer(previousBidder, previousBid),
-                "WMON refund failed"
+                wmega.transfer(previousBidder, previousBid),
+                "WMEGA refund failed"
             );
             emit BidRefunded(previousBidder, previousBid);
         }

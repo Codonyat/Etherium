@@ -2,18 +2,13 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMON} from "../.././src/Strategy.sol";
+import {Strategy, IWMEGA} from "../.././src/Strategy.sol";
+import {WMEGAAddresses} from "../.././script/WMEGAAddresses.sol";
 
 abstract contract StrategyTestBase is Test {
-    Strategy public monstr;
-    IWMON public wmon;
+    Strategy public giga;
+    IWMEGA public wmega;
     MockERC20 public communityToken;
-
-    // Monad WMON addresses
-    address public constant WMON_MAINNET =
-        0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A;
-    address public constant WMON_TESTNET =
-        0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
 
     // Common test addresses
     address public alice = address(0x1);
@@ -25,14 +20,14 @@ abstract contract StrategyTestBase is Test {
     // Events for testing
     event Minted(
         address indexed user,
-        uint256 monAmount,
+        uint256 megaAmount,
         uint256 userTokens,
         uint256 feeTokens
     );
     event Redeemed(
         address indexed user,
         uint256 tokenAmount,
-        uint256 monAmount,
+        uint256 megaAmount,
         uint256 fee
     );
     event Transfer(address indexed from, address indexed to, uint256 value);
@@ -49,8 +44,8 @@ abstract contract StrategyTestBase is Test {
     event LotteryWon(address indexed winner, uint256 amount, uint256 day);
     event AuctionWon(
         address indexed winner,
-        uint256 monstrAmount,
-        uint256 monPaid,
+        uint256 gigaAmount,
+        uint256 megaPaid,
         uint256 day
     );
     event BeneficiaryFunded(
@@ -60,23 +55,23 @@ abstract contract StrategyTestBase is Test {
     );
 
     function setUp() public virtual {
-        // Determine which WMON to use based on chain ID
-        address wmonAddress = getWMONAddress();
+        // Determine which WMEGA to use based on chain ID
+        address wmegaAddress = WMEGAAddresses.getWMEGAAddress();
 
-        if (wmonAddress == address(0)) {
-            // No real WMON available - deploy mock for local testing
-            MockWMON mockWmon = new MockWMON();
-            wmon = IWMON(address(mockWmon));
+        if (wmegaAddress == address(0)) {
+            // No real WMEGA available - deploy mock for local testing
+            MockWMEGA mockWmega = new MockWMEGA();
+            wmega = IWMEGA(address(mockWmega));
         } else {
-            // Use real WMON from the network
-            wmon = IWMON(wmonAddress);
+            // Use real WMEGA from the network
+            wmega = IWMEGA(wmegaAddress);
         }
 
         // Deploy mock community token for tests that need it
         communityToken = new MockERC20();
 
-        // Deploy Strategy with appropriate WMON
-        monstr = new Strategy(address(wmon));
+        // Deploy Strategy with appropriate WMEGA
+        giga = new Strategy(address(wmega));
 
         // Fund test accounts
         vm.deal(alice, 100 ether);
@@ -84,24 +79,6 @@ abstract contract StrategyTestBase is Test {
         vm.deal(charlie, 100 ether);
         vm.deal(david, 100 ether);
         vm.deal(eve, 100 ether);
-    }
-
-    /// @dev Returns the appropriate WMON address for the current chain, or address(0) for local testing
-    function getWMONAddress() internal view returns (address) {
-        uint256 chainId = block.chainid;
-
-        // Monad Mainnet chain ID (update when known)
-        if (chainId == 143) {
-            return WMON_MAINNET;
-        }
-        // Monad Testnet chain ID
-        else if (chainId == 10143) {
-            return WMON_TESTNET;
-        }
-        // Local testing (Foundry default is 31337)
-        else {
-            return address(0);
-        }
     }
 
     // Note: Community token is now hardcoded in the contract
@@ -119,60 +96,60 @@ abstract contract StrategyTestBase is Test {
 
     // Helper function to skip past the minting period
     function skipPastMintingPeriod() internal {
-        uint256 mintingPeriod = monstr.MINTING_PERIOD();
+        uint256 mintingPeriod = giga.MINTING_PERIOD();
         vm.warp(block.timestamp + mintingPeriod + 1 days);
     }
 
     // Helper function to set up basic holders
     function setupBasicHolders() internal {
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 5 ether}();
+        giga.mint{value: 5 ether}();
 
         vm.prank(charlie);
-        monstr.mint{value: 2 ether}();
+        giga.mint{value: 2 ether}();
     }
 }
 
 // Common mock contracts used across tests
 contract MockContract {
-    function mintStrategy(Strategy _monstr) external {
-        _monstr.mint{value: 1 ether}();
+    function mintStrategy(Strategy _giga) external {
+        _giga.mint{value: 1 ether}();
     }
 
     function transferStrategy(
-        Strategy _monstr,
+        Strategy _giga,
         address to,
         uint256 amount
     ) external {
-        _monstr.transfer(to, amount);
+        _giga.transfer(to, amount);
     }
 
     function approveStrategy(
-        Strategy _monstr,
+        Strategy _giga,
         address spender,
         uint256 amount
     ) external {
-        _monstr.approve(spender, amount);
+        _giga.approve(spender, amount);
     }
 
     function transferFromStrategy(
-        Strategy _monstr,
+        Strategy _giga,
         address from,
         address to,
         uint256 amount
     ) external {
-        _monstr.transferFrom(from, to, amount);
+        _giga.transferFrom(from, to, amount);
     }
 
     receive() external payable {}
 }
 
-// Contract that rejects MON transfers
-contract MockRejectETH {
-    // No receive or fallback function - will reject MON transfers
+// Contract that rejects native transfers
+contract MockRejectNative {
+    // No receive or fallback function - will reject native transfers
 }
 
 // Attack contract for reentrancy tests
@@ -243,10 +220,10 @@ contract MockERC20 {
     }
 }
 
-// Mock WMON for local testing
+// Mock WMEGA for local testing
 // This is only used when running tests without a fork (local testing)
-// When testing on Monad forks, the real WMON contract is used instead
-contract MockWMON {
+// When testing on MegaETH forks, the real WMEGA contract is used instead
+contract MockWMEGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
@@ -266,7 +243,7 @@ contract MockWMON {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "MON transfer failed");
+        require(success, "MEGA transfer failed");
         emit Transfer(msg.sender, address(0), amount);
     }
 

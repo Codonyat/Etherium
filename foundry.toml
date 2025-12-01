@@ -12,13 +12,8 @@ optimizer = true
 optimizer_runs = 100000 # 2^32-1
 
 [rpc_endpoints]
-# Ethereum (legacy)
-mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}"
+# MegaETH Mainnet (Chain ID: 4326)
 
-# Monad Mainnet (Chain ID: 143)
-monad = "https://monad-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}" # RPC URL TBA, set via env variable when available
-
-# Monad Testnet (Chain ID: 10143)
-monad_testnet = "https://testnet-rpc.monad.xyz" # QuickNode, 25 rps, archives supported
-monad_testnet_ankr = "https://rpc.ankr.com/monad_testnet" # Ankr, 300 req/10s, no archives
-monad_testnet_foundation = "https://rpc-testnet.monadinfra.com" # Monad Foundation, 20 rps, archives
+# MegaETH Testnet (Chain ID: 6343)
+mega_testnet = "https://timothy.megaeth.com/rpc"
+mega_testnet_alchemy = "https://megaeth-testnet.g.alchemy.com/v2/${ALCHEMY_KEY}" # Alchemy

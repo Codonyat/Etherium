@@ -2,12 +2,12 @@
 pragma solidity ^0.8.20;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Strategy, IWMON} from "../src/Strategy.sol";
-import {MockWMON} from "././helpers/WSTRATHelpers.sol";
+import {Strategy, IWMEGA} from "../src/Strategy.sol";
+import {MockWMEGA} from "././helpers/WSTRATHelpers.sol";
 
 contract StrategyDonationTest is Test {
-    Strategy public monstr;
-    MockWMON public wmon;
+    Strategy public giga;
+    MockWMEGA public wmega;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -16,20 +16,20 @@ contract StrategyDonationTest is Test {
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Minted(
         address indexed to,
-        uint256 monAmount,
-        uint256 monstrAmount,
+        uint256 megaAmount,
+        uint256 gigaAmount,
         uint256 fee
     );
     event Redeemed(
         address indexed from,
-        uint256 monstrAmount,
-        uint256 monAmount,
+        uint256 gigaAmount,
+        uint256 megaAmount,
         uint256 fee
     );
 
     function setUp() public {
-        wmon = new MockWMON();
-        monstr = new Strategy(address(wmon));
+        wmega = new MockWMEGA();
+        giga = new Strategy(address(wmega));
 
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -46,21 +46,21 @@ contract StrategyDonationTest is Test {
         emit Minted(alice, mintAmount, expectedTokens, expectedFee);
 
         vm.prank(alice);
-        monstr.mint{value: mintAmount}();
+        giga.mint{value: mintAmount}();
 
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             expectedTokens,
             "Alice should receive 9.9 tokens"
         );
         assertEq(
-            monstr.balanceOf(monstr.FEES_POOL()),
+            giga.balanceOf(giga.FEES_POOL()),
             expectedFee,
             "Fees pool should have 0.1 tokens"
         );
 
-        uint256 totalSupplyBefore = monstr.totalSupply();
-        uint256 contractBalanceBefore = address(monstr).balance;
+        uint256 totalSupplyBefore = giga.totalSupply();
+        uint256 contractBalanceBefore = address(giga).balance;
         assertEq(
             totalSupplyBefore,
             10 ether,
@@ -69,55 +69,55 @@ contract StrategyDonationTest is Test {
         assertEq(
             contractBalanceBefore,
             mintAmount,
-            "Contract should hold 10 MON"
+            "Contract should hold 10 MEGA"
         );
 
         // Calculate redemption value before donation
-        uint256 redeemAmount = 1 ether; // 1 MONSTR
-        uint256 fee = redeemAmount / 100; // 0.01 MONSTR fee
-        uint256 netAmount = redeemAmount - fee; // 0.99 MONSTR
+        uint256 redeemAmount = 1 ether; // 1 GIGA
+        uint256 fee = redeemAmount / 100; // 0.01 GIGA fee
+        uint256 netAmount = redeemAmount - fee; // 0.99 GIGA
         uint256 redemptionValueBefore = (netAmount * contractBalanceBefore) /
             totalSupplyBefore;
         assertEq(
             redemptionValueBefore,
             0.99 ether,
-            "Redemption value before should be 0.99 MON"
+            "Redemption value before should be 0.99 MEGA"
         );
 
-        // Donor sends 5 MON to the contract
+        // Donor sends 5 MEGA to the contract
         uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success, ) = address(monstr).call{value: donationAmount}("");
+        (bool success, ) = address(giga).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
 
         // Check contract balance increased
         assertEq(
-            address(monstr).balance,
+            address(giga).balance,
             contractBalanceBefore + donationAmount,
-            "Contract balance should increase by 5 MON"
+            "Contract balance should increase by 5 MEGA"
         );
 
         // Check total supply unchanged
         assertEq(
-            monstr.totalSupply(),
+            giga.totalSupply(),
             totalSupplyBefore,
             "Total supply should remain 10 tokens"
         );
 
         // Calculate redemption value after donation
-        uint256 redemptionValueAfter = (netAmount * address(monstr).balance) /
-            monstr.totalSupply();
+        uint256 redemptionValueAfter = (netAmount * address(giga).balance) /
+            giga.totalSupply();
         assertEq(
             redemptionValueAfter,
             1.485 ether,
-            "Redemption value after should be 1.485 MON"
+            "Redemption value after should be 1.485 MEGA"
         );
 
         // Redemption value should increase by 50%
         assertEq(
             redemptionValueAfter - redemptionValueBefore,
             0.495 ether,
-            "Redemption value should increase by 0.495 MON"
+            "Redemption value should increase by 0.495 MEGA"
         );
     }
 
@@ -127,22 +127,22 @@ contract StrategyDonationTest is Test {
         emit Minted(alice, 1 ether, 0.99 ether, 0.01 ether);
 
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             0.99 ether,
             "Alice should get 0.99 tokens"
         );
 
-        // Donate MON
+        // Donate MEGA
         uint256 donationAmount = 10 ether;
         vm.prank(donor);
-        (bool success, ) = address(monstr).call{value: donationAmount}("");
+        (bool success, ) = address(giga).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
         assertEq(
-            address(monstr).balance,
+            address(giga).balance,
             11 ether,
-            "Contract should have 11 MON"
+            "Contract should have 11 MEGA"
         );
 
         // Bob mints after donation
@@ -150,35 +150,35 @@ contract StrategyDonationTest is Test {
         emit Minted(bob, 1 ether, 0.99 ether, 0.01 ether);
 
         vm.prank(bob);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
-        // Bob should still get the standard amount (0.99 MONSTR after 1% fee)
+        // Bob should still get the standard amount (0.99 GIGA after 1% fee)
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             0.99 ether,
             "Bob should get 0.99 tokens despite donation"
         );
         assertEq(
-            address(monstr).balance,
+            address(giga).balance,
             12 ether,
-            "Contract should have 12 MON"
+            "Contract should have 12 MEGA"
         );
     }
 
     function testDonationDoesntBreakLottery() public {
         // Setup holders
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             9.9 ether,
             "Alice should have 9.9 tokens"
         );
 
         vm.prank(bob);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             9.9 ether,
             "Bob should have 9.9 tokens"
         );
@@ -190,32 +190,32 @@ contract StrategyDonationTest is Test {
         emit Transfer(alice, bob, 0.99 ether); // Bob receives 0.99 after fee
 
         vm.prank(alice);
-        monstr.transfer(bob, transferAmount);
+        giga.transfer(bob, transferAmount);
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             8.9 ether,
             "Alice should have 8.9 tokens"
         );
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             10.89 ether,
             "Bob should have 10.89 tokens"
         );
         assertEq(
-            monstr.balanceOf(monstr.FEES_POOL()),
+            giga.balanceOf(giga.FEES_POOL()),
             0.21 ether,
             "Fees pool should have 0.21 tokens"
         );
 
-        // Donate MON
+        // Donate MEGA
         uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success, ) = address(monstr).call{value: donationAmount}("");
+        (bool success, ) = address(giga).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
         assertEq(
-            address(monstr).balance,
+            address(giga).balance,
             25 ether,
-            "Contract should have 25 MON"
+            "Contract should have 25 MEGA"
         );
 
         // Move to day 1
@@ -226,19 +226,19 @@ contract StrategyDonationTest is Test {
         emit Transfer(bob, alice, 0.99 ether);
 
         vm.prank(bob);
-        monstr.transfer(alice, transferAmount);
+        giga.transfer(alice, transferAmount);
         assertEq(
-            monstr.balanceOf(bob),
+            giga.balanceOf(bob),
             9.89 ether,
             "Bob should have 9.89 tokens"
         );
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             9.89 ether,
             "Alice should have 9.89 tokens"
         );
         assertEq(
-            monstr.balanceOf(monstr.FEES_POOL()),
+            giga.balanceOf(giga.FEES_POOL()),
             0.22 ether,
             "Fees pool should have 0.22 tokens"
         );
@@ -247,11 +247,11 @@ contract StrategyDonationTest is Test {
         vm.warp(block.timestamp + 25 hours + 61);
 
         // Lottery should execute without issues
-        monstr.executeLottery();
+        giga.executeLottery();
 
         // Check lottery executed
         assertEq(
-            monstr.lastLotteryDay(),
+            giga.lastLotteryDay(),
             2,
             "Lottery should be executed for day 2"
         );
@@ -260,52 +260,52 @@ contract StrategyDonationTest is Test {
     function testMultipleDonations() public {
         // Initial setup
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
-        uint256 initialBalance = address(monstr).balance;
+        uint256 initialBalance = address(giga).balance;
 
         // Multiple donations
         for (uint256 i = 0; i < 5; i++) {
             address currentDonor = address(uint160(0x100 + i));
             vm.deal(currentDonor, 10 ether);
             vm.prank(currentDonor);
-            (bool success, ) = address(monstr).call{value: 1 ether}("");
+            (bool success, ) = address(giga).call{value: 1 ether}("");
             assertTrue(success, "Each donation should succeed");
         }
 
         // Contract should have received all donations
-        assertEq(address(monstr).balance, initialBalance + 5 ether);
+        assertEq(address(giga).balance, initialBalance + 5 ether);
 
         // Total supply should be unchanged
-        assertEq(monstr.totalSupply(), 1 ether); // Only from Alice's mint (1:1 ratio)
+        assertEq(giga.totalSupply(), 1 ether); // Only from Alice's mint (1:1 ratio)
     }
 
     function testDonationAfterMintingPeriod() public {
         // Mint during minting period
         vm.prank(alice);
-        monstr.mint{value: 10 ether}();
+        giga.mint{value: 10 ether}();
 
         // Move past minting period
-        vm.warp(block.timestamp + monstr.MINTING_PERIOD() + 1 days);
+        vm.warp(block.timestamp + giga.MINTING_PERIOD() + 1 days);
 
         // Alice redeems to trigger max supply setting
         vm.prank(alice);
-        monstr.redeem(0.1 ether);
+        giga.redeem(0.1 ether);
 
-        uint256 maxSupply = monstr.maxSupplyEver();
+        uint256 maxSupply = giga.maxSupplyEver();
         assertTrue(maxSupply > 0, "Max supply should be set");
 
-        // Donate MON after minting period
+        // Donate MEGA after minting period
         vm.prank(donor);
-        (bool success, ) = address(monstr).call{value: 5 ether}("");
+        (bool success, ) = address(giga).call{value: 5 ether}("");
         assertTrue(success, "Donation should work after minting period");
 
         // Max supply should remain unchanged
-        assertEq(monstr.maxSupplyEver(), maxSupply);
+        assertEq(giga.maxSupplyEver(), maxSupply);
 
         // Bob can still mint (within capacity)
         vm.prank(bob);
-        monstr.mint{value: 0.09 ether}();
+        giga.mint{value: 0.09 ether}();
     }
 
     function testRedemptionWithDonation() public {
@@ -315,51 +315,51 @@ contract StrategyDonationTest is Test {
         emit Minted(alice, mintAmount, 9.9 ether, 0.1 ether);
 
         vm.prank(alice);
-        monstr.mint{value: mintAmount}();
+        giga.mint{value: mintAmount}();
 
-        uint256 aliceTokens = monstr.balanceOf(alice);
+        uint256 aliceTokens = giga.balanceOf(alice);
         assertEq(aliceTokens, 9.9 ether, "Alice should have 9.9 tokens");
 
-        // Donate 5 MON
+        // Donate 5 MEGA
         uint256 donationAmount = 5 ether;
         vm.prank(donor);
-        (bool success, ) = address(monstr).call{value: donationAmount}("");
+        (bool success, ) = address(giga).call{value: donationAmount}("");
         assertTrue(success, "Donation should succeed");
         assertEq(
-            address(monstr).balance,
+            address(giga).balance,
             15 ether,
-            "Contract should have 15 MON"
+            "Contract should have 15 MEGA"
         );
 
         // Alice redeems half her tokens
         uint256 redeemAmount = aliceTokens / 2; // 4,950 tokens
         uint256 redeemFee = redeemAmount / 100; // 49.5 tokens fee
         uint256 netRedeemed = redeemAmount - redeemFee; // 4,900.5 tokens
-        uint256 expectedEth = (netRedeemed * 15 ether) / monstr.totalSupply(); // (4900.5 * 15) / 10000 = 7.35075 MON
+        uint256 expectedNative = (netRedeemed * 15 ether) / giga.totalSupply(); // (4900.5 * 15) / 10000 = 7.35075 MEGA
 
-        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceNativeBefore = alice.balance;
 
         vm.expectEmit(true, true, true, true);
-        emit Redeemed(alice, redeemAmount, expectedEth, redeemFee);
+        emit Redeemed(alice, redeemAmount, expectedNative, redeemFee);
 
         vm.prank(alice);
-        monstr.redeem(redeemAmount);
+        giga.redeem(redeemAmount);
 
-        uint256 aliceEthAfter = alice.balance;
-        uint256 ethReceived = aliceEthAfter - aliceEthBefore;
+        uint256 aliceNativeAfter = alice.balance;
+        uint256 nativeReceived = aliceNativeAfter - aliceNativeBefore;
 
-        // Alice should have received more MON due to donation
+        // Alice should have received more native due to donation
         assertEq(
-            ethReceived,
-            expectedEth,
-            "Alice should receive exact MON amount"
+            nativeReceived,
+            expectedNative,
+            "Alice should receive exact MEGA amount"
         );
         assertTrue(
-            ethReceived > 7.35 ether,
-            "Should receive over 7.35 MON due to donation"
+            nativeReceived > 7.35 ether,
+            "Should receive over 7.35 native due to donation"
         );
         assertEq(
-            monstr.balanceOf(alice),
+            giga.balanceOf(alice),
             4.95 ether,
             "Alice should have 4,950 tokens left"
         );
@@ -372,23 +372,23 @@ contract StrategyDonationTest is Test {
 
         // Initial mint
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
         uint256 totalDonated = 0;
-        uint256 initialBalance = address(monstr).balance;
+        uint256 initialBalance = address(giga).balance;
 
         // Make donations
         for (uint256 i = 0; i < numDonors; i++) {
             address currentDonor = address(uint160(0x1000 + i));
             vm.deal(currentDonor, donationAmount + 1 ether);
             vm.prank(currentDonor);
-            (bool success, ) = address(monstr).call{value: donationAmount}("");
+            (bool success, ) = address(giga).call{value: donationAmount}("");
             assertTrue(success, "Donation should succeed");
             totalDonated += donationAmount;
         }
 
         // Verify accounting
-        assertEq(address(monstr).balance, initialBalance + totalDonated);
-        assertEq(monstr.totalSupply(), 1 ether); // Unchanged
+        assertEq(address(giga).balance, initialBalance + totalDonated);
+        assertEq(giga.totalSupply(), 1 ether); // Unchanged
     }
 }

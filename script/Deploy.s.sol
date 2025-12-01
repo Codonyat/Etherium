@@ -3,38 +3,28 @@ pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {Strategy} from "../src/Strategy.sol";
+import {WMEGAAddresses} from "./WMEGAAddresses.sol";
 
 /** @dev deployment:
     With Ledger:
-    forge script script/Deploy.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --ledger --hd-paths $HD_PATH
+    forge script script/Deploy.s.sol --rpc-url mega_testnet_alchemy --broadcast --ledger --hd-paths $HD_PATH \
+    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei
 
     With Private Key:
-    forge script script/Deploy.s.sol --rpc-url https://testnet-rpc.monad.xyz --broadcast --private-key $PRIVATE_KEY
+    forge script script/Deploy.s.sol --rpc-url mega_testnet_alchemy --broadcast --private-key $PRIVATE_KEY \
+    --priority-gas-price 0.001gwei --with-gas-price 0.01gwei
 */
 contract DeployScript is Script {
-    address wmonAddress;
-
-    function setUp() public {
-        // Monad Mainnet
-        if (block.chainid == 143) {
-            wmonAddress = 0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A;
-        }
-        // Monad Testnet
-        else if (block.chainid == 10143) {
-            wmonAddress = 0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701;
-        } else {
-            revert("Not a supported chain.");
-        }
-    }
-
     function run() public {
+        address wmegaAddress = WMEGAAddresses.getWMEGAAddressStrict();
+
         vm.startBroadcast();
 
-        Strategy monstr = new Strategy(wmonAddress);
+        Strategy giga = new Strategy(wmegaAddress);
 
-        console.log("Strategy deployed at:", address(monstr));
-        console.log("WMON address:", wmonAddress);
-        console.log("Community token:", address(monstr.COMMUNITY_TOKEN()));
+        console.log("Strategy deployed at:", address(giga));
+        console.log("WMEGA address:", wmegaAddress);
+        console.log("Community token:", address(giga.COMMUNITY_TOKEN()));
         console.log("Deployment time:", block.timestamp);
         console.log("Minting end time:", block.timestamp + 7 days);
 

@@ -8,23 +8,23 @@ contract StrategyFenwickTest is StrategyTestBase {
     function testFenwickDebug() public {
         // Set up same scenario as probability test
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
         vm.prank(charlie);
-        monstr.mint{value: 1 ether}();
+        giga.mint{value: 1 ether}();
 
         // Take snapshot
         MockContract trigger = new MockContract();
         vm.deal(address(trigger), 1 ether);
-        trigger.mintStrategy(monstr);
+        trigger.mintStrategy(giga);
 
         // Check what indices point to what
         console.log("Holder indices:");
-        for (uint256 i = 1; i <= monstr.getHolderCount(); i++) {
-            (address holder, uint256 balance) = monstr.getHolderByIndex(i);
+        for (uint256 i = 1; i <= giga.getHolderCount(); i++) {
+            (address holder, uint256 balance) = giga.getHolderByIndex(i);
             console.log("Index:", i);
             console.log("Holder:", holder);
             console.log("Balance:", balance);
@@ -32,13 +32,13 @@ contract StrategyFenwickTest is StrategyTestBase {
 
         // Check cumulative sums
         console.log("\nCumulative sums:");
-        for (uint256 i = 1; i <= monstr.getHolderCount(); i++) {
-            uint256 cumSum = monstr.getSuffixSum(i);
+        for (uint256 i = 1; i <= giga.getHolderCount(); i++) {
+            uint256 cumSum = giga.getSuffixSum(i);
             console.log("Cumulative at index", i, ":", cumSum);
         }
 
         // Test winner selection with different random values
-        uint256 totalSupply = monstr.getSuffixSum(monstr.getHolderCount());
+        uint256 totalSupply = giga.getSuffixSum(giga.getHolderCount());
         console.log("\nTotal supply from Fenwick:", totalSupply);
 
         // Test different random positions
@@ -55,7 +55,7 @@ contract StrategyFenwickTest is StrategyTestBase {
 
             // Binary search to find winner
             uint256 winnerIndex = findWinnerIndex(position);
-            (address winner, ) = monstr.getHolderByIndex(winnerIndex);
+            (address winner, ) = giga.getHolderByIndex(winnerIndex);
             console.log("Winner index:", winnerIndex);
             console.log("Winner address:", winner);
         }
@@ -64,19 +64,19 @@ contract StrategyFenwickTest is StrategyTestBase {
     function testFenwickTreeCumulativeSums() public {
         // Add holders with known balances
         vm.prank(alice);
-        monstr.mint{value: 1 ether}(); // 0.99 tokens
+        giga.mint{value: 1 ether}(); // 0.99 tokens
 
         vm.prank(bob);
-        monstr.mint{value: 2 ether}(); // 1.98 tokens
+        giga.mint{value: 2 ether}(); // 1.98 tokens
 
         vm.prank(charlie);
-        monstr.mint{value: 3 ether}(); // 2.97 tokens
+        giga.mint{value: 3 ether}(); // 2.97 tokens
 
         // getSuffixSum returns cumulative sum from index to end
         // So getSuffixSum(1) returns total of all holders
-        uint256 cumSum1 = monstr.getSuffixSum(1);
-        uint256 cumSum2 = monstr.getSuffixSum(2);
-        uint256 cumSum3 = monstr.getSuffixSum(3);
+        uint256 cumSum1 = giga.getSuffixSum(1);
+        uint256 cumSum2 = giga.getSuffixSum(2);
+        uint256 cumSum3 = giga.getSuffixSum(3);
 
         // Total should be 0.99 + 1.98 + 2.97 = 5.94
         assertEq(
@@ -95,30 +95,30 @@ contract StrategyFenwickTest is StrategyTestBase {
     function testFenwickTreeConsistencyAfterOperations() public {
         // Initial setup
         vm.prank(alice);
-        monstr.mint{value: 5 ether}();
+        giga.mint{value: 5 ether}();
 
         vm.prank(bob);
-        monstr.mint{value: 3 ether}();
+        giga.mint{value: 3 ether}();
 
         // Perform various operations
         vm.prank(alice);
-        monstr.transfer(bob, 1 ether);
+        giga.transfer(bob, 1 ether);
 
         vm.prank(bob);
-        monstr.transfer(charlie, 0.5 ether);
+        giga.transfer(charlie, 0.5 ether);
 
         // Add new holder
         vm.prank(david);
-        monstr.mint{value: 2 ether}();
+        giga.mint{value: 2 ether}();
 
         // Check consistency - getSuffixSum(1) gets total from beginning
-        uint256 totalFromFenwick = monstr.getSuffixSum(1);
+        uint256 totalFromFenwick = giga.getSuffixSum(1);
 
         // Calculate expected total (accounting for fees)
-        uint256 aliceBalance = monstr.balanceOf(alice);
-        uint256 bobBalance = monstr.balanceOf(bob);
-        uint256 charlieBalance = monstr.balanceOf(charlie);
-        uint256 davidBalance = monstr.balanceOf(david);
+        uint256 aliceBalance = giga.balanceOf(alice);
+        uint256 bobBalance = giga.balanceOf(bob);
+        uint256 charlieBalance = giga.balanceOf(charlie);
+        uint256 davidBalance = giga.balanceOf(david);
 
         uint256 expectedHolderTotal = aliceBalance +
             bobBalance +
@@ -134,31 +134,31 @@ contract StrategyFenwickTest is StrategyTestBase {
 
     function testHolderTracking() public {
         // Initially no holders
-        assertEq(monstr.getHolderCount(), 0);
+        assertEq(giga.getHolderCount(), 0);
 
         // Alice becomes a holder
         vm.prank(alice);
-        monstr.mint{value: 1 ether}();
-        assertEq(monstr.getHolderCount(), 1);
-        assertTrue(monstr.isHolder(alice));
+        giga.mint{value: 1 ether}();
+        assertEq(giga.getHolderCount(), 1);
+        assertTrue(giga.isHolder(alice));
 
         // Bob becomes a holder
         vm.prank(bob);
-        monstr.mint{value: 1 ether}();
-        assertEq(monstr.getHolderCount(), 2);
-        assertTrue(monstr.isHolder(bob));
+        giga.mint{value: 1 ether}();
+        assertEq(giga.getHolderCount(), 2);
+        assertTrue(giga.isHolder(bob));
 
         // Alice transfers all to Bob (Alice should be removed as holder)
-        uint256 aliceBalance = monstr.balanceOf(alice);
+        uint256 aliceBalance = giga.balanceOf(alice);
         vm.prank(alice);
-        monstr.transfer(bob, aliceBalance);
+        giga.transfer(bob, aliceBalance);
 
         // Alice should no longer be a holder
-        assertFalse(monstr.isHolder(alice));
+        assertFalse(giga.isHolder(alice));
         // Holder count depends on whether alice was removed or not
         // In the implementation, holders are not removed when balance goes to 0
         // They're just tracked with 0 balance
-        assertTrue(monstr.isHolder(bob));
+        assertTrue(giga.isHolder(bob));
     }
 
     function testPackedStorageOptimization() public {
@@ -169,27 +169,27 @@ contract StrategyFenwickTest is StrategyTestBase {
             address holder = address(uint160(0x1000 + i));
             vm.deal(holder, 1 ether);
             vm.prank(holder);
-            monstr.mint{value: 0.1 ether}();
+            giga.mint{value: 0.1 ether}();
         }
 
-        assertEq(monstr.getHolderCount(), numHolders);
+        assertEq(giga.getHolderCount(), numHolders);
 
         // Verify all holders are tracked correctly
         for (uint256 i = 1; i <= numHolders; i++) {
-            (address holder, uint256 balance) = monstr.getHolderByIndex(i);
+            (address holder, uint256 balance) = giga.getHolderByIndex(i);
             assertEq(holder, address(uint160(0x1000 + i - 1)));
-            assertEq(balance, 0.099 ether); // 0.1 MON * 0.99 (after 1% fee)
+            assertEq(balance, 0.099 ether); // 0.1 MEGA * 0.99 (after 1% fee)
         }
     }
 
     // Helper function for binary search
     function findWinnerIndex(uint256 position) internal view returns (uint256) {
         uint256 left = 1;
-        uint256 right = monstr.getHolderCount();
+        uint256 right = giga.getHolderCount();
 
         while (left < right) {
             uint256 mid = (left + right) / 2;
-            uint256 cumSum = monstr.getSuffixSum(mid);
+            uint256 cumSum = giga.getSuffixSum(mid);
 
             if (cumSum <= position) {
                 left = mid + 1;
