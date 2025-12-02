@@ -17,20 +17,10 @@ contract DeployMockERC20Script is Script {
     function run() public {
         vm.startBroadcast();
 
-        // Get deployer address (msg.sender during broadcast)
-        address deployer = msg.sender;
+        // Deploy mock MEGA token (with 18 decimals)
+        MockERC20 mockToken = new MockERC20("Mock MEGA", "MEGA");
 
-        // Deploy mock token with 1000 tokens (with 18 decimals)
-        MockERC20 mockToken = new MockERC20(
-            "Mock Token",
-            "MOCK",
-            deployer,
-            1000 * 10 ** 18
-        );
-
-        console.log("MockERC20 deployed at:", address(mockToken));
-        console.log("Deployer address:", deployer);
-        console.log("Initial balance:", mockToken.balanceOf(deployer));
+        console.log("Mock MEGA deployed at:", address(mockToken));
 
         vm.stopBroadcast();
     }
