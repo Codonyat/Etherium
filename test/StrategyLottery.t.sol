@@ -343,9 +343,8 @@ contract StrategyLotteryTest is StrategyTestBase {
         (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
-        // Day 0 fees: 0.151 tokens total
-        // During minting period, ALL fees go to lottery (no auction split)
-        assertEq(amount, 0.151 ether, "Day 0 lottery prize should be 0.151 tokens");
+        // Day 0 fees: 0.151 tokens total, split 50/50 between lottery and auction
+        assertEq(amount, 0.0755 ether, "Day 0 lottery prize should be half of 0.151 tokens");
     }
 
     function testDelayedLotteryTrigger() public {

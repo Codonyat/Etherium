@@ -36,6 +36,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     uint256 public immutable deploymentTime;
     uint256 public immutable mintingEndTime;
+    uint256 public immutable oneDayEndTime;
 
     // Packed storage slot: 112 + 32 + 8 = 152 bits (fits in one 256-bit slot)
     uint112 public maxSupplyEver; // Set after minting period (max ~5.2 quadrillion GIGA with 18 decimals)
@@ -157,7 +158,10 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
      */
     constructor(address _mega) ERC20("GigaETH", "GIGA") {
         deploymentTime = block.timestamp;
+        oneDayEndTime = deploymentTime + 1 days;
         mintingEndTime = deploymentTime + MINTING_PERIOD;
+        require(mintingEndTime >= oneDayEndTime);
+
         mega = IERC20(_mega);
     }
 
@@ -216,11 +220,11 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Transfer MEGA from user (requires prior approval)
         mega.safeTransferFrom(msg.sender, address(this), collateralAmount);
 
-        if (block.timestamp <= mintingEndTime) {
-            // During minting period: 1:1 in base units (1000 MEGA = 1 GIGA in display units)
+        if (block.timestamp <= oneDayEndTime) {
+            // During first day 1:1 in base units (1000 MEGA = 1 GIGA in display units)
+            // This is to avoid an inflation attack
             tokensToMint = collateralAmount;
         } else {
-            // After minting period: proportional to MEGA/supply ratio
             if (totalSupply() > 0 && megaReserveBefore > 0) {
                 // Mint proportionally to maintain MEGA backing ratio
                 tokensToMint =
@@ -231,11 +235,14 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
                 tokensToMint = collateralAmount;
             }
 
-            require(
-                totalSupply() + tokensToMint <= maxSupplyEver,
-                "Max supply reached"
-            );
-            require(tokensToMint >= 100, "Minimum mint amount is 100 wei");
+            if (block.timestamp > mintingEndTime) {
+                // Enforce max supply after minting period
+                require(
+                    totalSupply() + tokensToMint <= maxSupplyEver,
+                    "Max supply reached"
+                );
+                require(tokensToMint >= 100, "Minimum mint amount is 100 wei");
+            }
         }
 
         // Calculate and apply fees (common to both minting periods)
@@ -274,8 +281,36 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Try to execute pending lottery/auction before changing state
         _tryExecuteLotteryAndAuction();
 
+        // Get reserve BEFORE transfer for accurate calculation
+        uint256 megaReserveBefore = getMegaReserve();
+
         // Transfer MEGA from user (requires prior approval)
         mega.safeTransferFrom(msg.sender, address(this), collateralAmount);
+
+        uint256 tokensToMint;
+        if (block.timestamp <= oneDayEndTime) {
+            // During first day 1:1 in base units (1000 MEGA = 1 GIGA in display units)
+            // This is to avoid an inflation attack
+            tokensToMint = collateralAmount;
+        } else {
+            if (totalSupply() > 0 && megaReserveBefore > 0) {
+                // Mint proportionally to maintain MEGA backing ratio
+                tokensToMint =
+                    (collateralAmount * totalSupply()) /
+                    megaReserveBefore;
+            } else {
+                // Fallback to 1:1 if no supply or MEGA
+                tokensToMint = collateralAmount;
+            }
+        }
+
+        // After minting period: enforce max supply limit
+        if (block.timestamp > mintingEndTime) {
+            require(
+                totalSupply() + tokensToMint <= maxSupplyEver,
+                "Max supply reached"
+            );
+        }
 
         // Transfer community tokens from user to lock
         require(
@@ -289,17 +324,6 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
         // Track locked amount
         communityTokenLocked[msg.sender] += COMMUNITY_TOKEN_LOCK_AMOUNT;
-
-        // Mint without fees, 1:1 in base units (1000 MEGA = 1 GIGA in display units)
-        uint256 tokensToMint = collateralAmount;
-
-        // After minting period: enforce max supply limit
-        if (block.timestamp > mintingEndTime) {
-            require(
-                totalSupply() + tokensToMint <= maxSupplyEver,
-                "Max supply reached"
-            );
-        }
 
         // Mint full amount to user (no fees)
         // _mint uses _atomicUpdate internally, so Fenwick tree is updated atomically
@@ -719,17 +743,11 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // This ensures both lottery and auction get meaningful amounts when split
         if (feesToDistribute < MIN_FEES_FOR_DISTRIBUTION) return;
 
-        // Run both lottery and auction every day after minting period
-        // During minting period, only run lottery with full fees
-        if (block.timestamp > mintingEndTime) {
-            // Split fees 50/50 between lottery and auction
-            uint256 lotteryShare = feesToDistribute / 2;
-            uint256 auctionShare = feesToDistribute - lotteryShare; // Handle odd amounts
-            _executeLotteryInternal(lotteryShare);
-            _startAuction(auctionShare);
-        } else {
-            _executeLotteryInternal(feesToDistribute);
-        }
+        // Split fees 50/50 between lottery and auction
+        uint256 lotteryShare = feesToDistribute / 2;
+        uint256 auctionShare = feesToDistribute - lotteryShare; // Handle odd amounts
+        _executeLotteryInternal(lotteryShare);
+        _startAuction(auctionShare);
     }
 
     /**
@@ -850,15 +868,8 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // Split fees 50/50 between lottery and auction
         uint256 lotteryShare = feesToDistribute / 2;
         uint256 auctionShare = feesToDistribute - lotteryShare; // Handle odd amounts
-
-        // Run both lottery and auction every day after minting period
-        // During minting period, only run lottery with full fees
-        if (block.timestamp > mintingEndTime) {
-            _executeLotteryInternal(lotteryShare);
-            _startAuction(auctionShare);
-        } else {
-            _executeLotteryInternal(feesToDistribute);
-        }
+        _executeLotteryInternal(lotteryShare);
+        _startAuction(auctionShare);
     }
 
     /**

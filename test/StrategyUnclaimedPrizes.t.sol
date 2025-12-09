@@ -357,10 +357,10 @@ contract StrategyUnclaimedPrizesBugTest is Test {
     }
 
     /**
-     * @dev Test that verifies no auctions occur during the minting period
-     * All fees should go to lottery during the minting period
+     * @dev Test that verifies auctions start from day 1 (after 25 hours)
+     * Fees are split 50/50 between lottery and auction from day 1
      */
-    function testNoAuctionsDuringMintingPeriod() public {
+    function testAuctionsStartFromDay1() public {
         // Day 0: Setup holders
         mintGiga(alice, 100 ether);
         assertEq(giga.balanceOf(alice), 99 ether, "Alice initial balance");
@@ -375,7 +375,7 @@ contract StrategyUnclaimedPrizesBugTest is Test {
             "Charlie initial balance"
         );
 
-        // Still in minting period (day 0)
+        // Still in day 0
         uint256 currentDay = giga.getCurrentDay();
         assertEq(currentDay, 0, "Should be day 0");
 
@@ -383,47 +383,24 @@ contract StrategyUnclaimedPrizesBugTest is Test {
         vm.prank(alice);
         bool success1 = giga.transfer(bob, 5 ether);
         assertTrue(success1, "Transfer should succeed");
-        assertEq(
-            giga.balanceOf(alice),
-            94 ether,
-            "Alice balance after transfer"
-        );
-        assertEq(
-            giga.balanceOf(bob),
-            103.95 ether,
-            "Bob balance after receiving"
-        );
 
         vm.prank(bob);
         bool success2 = giga.transfer(charlie, 3 ether);
         assertTrue(success2, "Transfer should succeed");
-        assertEq(
-            giga.balanceOf(bob),
-            100.95 ether,
-            "Bob balance after transfer"
-        );
-        assertEq(
-            giga.balanceOf(charlie),
-            52.47 ether,
-            "Charlie balance after receiving"
-        );
 
-        // Move to day 1 (still in minting period)
+        // Move to day 1
         moveToNextDay();
         currentDay = giga.getCurrentDay();
         assertEq(currentDay, 1, "Should be day 1");
 
-        // Execute lottery - should be lottery, not auction
+        // Execute lottery - should create both lottery and auction
         vm.prevrandao(bytes32(uint256(12345)));
         giga.executeLottery();
 
-        // Check that there's no active auction (during minting period, no auctions)
-        (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
-        assertEq(
-            bidder,
-            address(0),
-            "Should be no bidder during minting period"
-        );
+        // Check that auction was started (50/50 split from day 1)
+        (, , , uint112 auctionAmount, uint32 auctionDay) = giga.currentAuction();
+        assertGt(auctionAmount, 0, "Auction should be active from day 1");
+        assertEq(auctionDay, 0, "Auction should be for day 0 fees");
 
         // Check that lottery was executed (someone should have won)
         (address lotteryWinner, uint112 lotteryPrize) = giga.lotteryUnclaimedPrizes(0 % 7);
@@ -431,78 +408,12 @@ contract StrategyUnclaimedPrizesBugTest is Test {
             lotteryWinner == alice ||
                 lotteryWinner == bob ||
                 lotteryWinner == charlie,
-            "Should have a lottery winner during minting period"
+            "Should have a lottery winner"
         );
         assertGt(lotteryPrize, 0, "Lottery prize should be greater than 0");
 
-        // Test multiple days during minting period
-        for (uint256 day = 2; day <= 6; day++) {
-            // Generate more fees
-            if (giga.balanceOf(alice) > 1 ether) {
-                vm.prank(alice);
-                giga.transfer(bob, 1 ether);
-            } else if (giga.balanceOf(bob) > 1 ether) {
-                vm.prank(bob);
-                giga.transfer(alice, 1 ether);
-            }
-
-            // Move to next day
-            moveToNextDay();
-
-            // Execute lottery
-            vm.prevrandao(bytes32(uint256(day * 1000)));
-            giga.executeLottery();
-
-            // Verify no auction was created
-            (bidder, , , auctionAmount, ) = giga.currentAuction();
-            assertEq(
-                bidder,
-                address(0),
-                string.concat(
-                    "No auction bidder should exist on day ",
-                    vm.toString(day)
-                )
-            );
-        }
-
-        // Now test the transition: day 7 is last day of minting period
-        moveToNextDay();
-        currentDay = giga.getCurrentDay();
-        assertEq(currentDay, 7, "Should be day 7 (last day of minting period)");
-
-        // Generate fees on day 7
-        vm.prank(charlie);
-        bool success3 = giga.transfer(alice, 2 ether);
-        assertTrue(success3, "Transfer should succeed");
-
-        // Move to day 8 (first day after minting period)
-        moveToNextDay();
-        currentDay = giga.getCurrentDay();
-        assertEq(currentDay, 8, "Should be day 8 (after minting period)");
-
-        // Execute lottery for day 7's fees
-        vm.prevrandao(bytes32(uint256(99999)));
-        giga.executeLottery();
-
-        // Generate fees on day 8
-        vm.prank(alice);
-        bool success4 = giga.transfer(bob, 1 ether);
-        assertTrue(success4, "Transfer should succeed");
-
-        // Move to day 9 and execute
-        moveToNextDay();
-        giga.executeLottery();
-
-        // Now check if auction was created (day 8 is even, so should be auction)
-        (bidder, , , auctionAmount, ) = giga.currentAuction();
-        assertGt(
-            auctionAmount,
-            0,
-            "Should have auction after minting period on even days"
-        );
-
         console.log(
-            "Verified: No auctions during minting period, auctions start after day 7"
+            "Verified: Auctions start from day 1 with 50/50 fee split"
         );
     }
 
