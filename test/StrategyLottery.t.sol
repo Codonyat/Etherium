@@ -66,10 +66,11 @@ contract StrategyLotteryTest is StrategyTestBase {
             winner == alice || winner == bob,
             "Winner should be alice or bob"
         );
+        uint256 expectedLotteryAmount = (0.01 ether * giga.LOTTERY_PERCENT()) / 100;
         assertEq(
             amount,
-            0.005 ether,
-            "Prize amount should be 0.005 GIGA (50% of 0.01 fee)"
+            expectedLotteryAmount,
+            "Prize amount should be LOTTERY_PERCENT of fee"
         );
     }
 
@@ -343,8 +344,9 @@ contract StrategyLotteryTest is StrategyTestBase {
         (address winner, uint112 amount) = giga.lotteryUnclaimedPrizes(0);
 
         assertTrue(winner != address(0), "Day 0 should have lottery winner");
-        // Day 0 fees: 0.151 tokens total, split 50/50 between lottery and auction
-        assertEq(amount, 0.0755 ether, "Day 0 lottery prize should be half of 0.151 tokens");
+        // Day 0 fees: 0.151 tokens total, split based on LOTTERY_PERCENT
+        uint256 expectedLotteryAmount = (0.151 ether * giga.LOTTERY_PERCENT()) / 100;
+        assertEq(amount, expectedLotteryAmount, "Day 0 lottery prize should be LOTTERY_PERCENT of fees");
     }
 
     function testDelayedLotteryTrigger() public {
@@ -447,19 +449,20 @@ contract StrategyLotteryTest is StrategyTestBase {
         // Check current auction to see if it has the fees
         (address bidder, , , uint112 auctionAmount, ) = giga.currentAuction();
 
-        // Should have auction with the fees
+        // Should have auction with (100 - LOTTERY_PERCENT)% of the fees
         assertGt(auctionAmount, 0, "Should have auction amount");
+        uint256 expectedAuctionAmount = (0.015 ether * (100 - giga.LOTTERY_PERCENT())) / 100;
         assertEq(
             auctionAmount,
-            0.0075 ether,
-            "Auction should have 0.0075 tokens (50% of 0.015 fees)"
+            expectedAuctionAmount,
+            "Auction should have correct percentage of fees"
         );
 
         // Verify LOT_POOL received the funds
         uint256 lotPoolBalance = giga.balanceOf(giga.LOT_POOL());
         assertGe(
             lotPoolBalance,
-            0.0075 ether,
+            expectedAuctionAmount,
             "LOT_POOL should have at least the prize amount"
         );
     }

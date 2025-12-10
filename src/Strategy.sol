@@ -45,6 +45,7 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
 
     uint256 public constant TIME_GAP = 1 minutes; // Must be 1 minute into new day before lottery can execute
     uint256 public constant MIN_FEES_FOR_DISTRIBUTION = 1e12; // Minimum fees (0.000001 GIGA) to run lottery/auction
+    uint256 public constant LOTTERY_PERCENT = 20; // Percentage of fees going to lottery (rest goes to auction)
 
     // Cyclical arrays for unclaimed prizes (7 slots each)
     // Separate arrays for lottery and auction to prevent slot conflicts
@@ -743,9 +744,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
         // This ensures both lottery and auction get meaningful amounts when split
         if (feesToDistribute < MIN_FEES_FOR_DISTRIBUTION) return;
 
-        // Split fees 50/50 between lottery and auction
-        uint256 lotteryShare = feesToDistribute / 2;
-        uint256 auctionShare = feesToDistribute - lotteryShare; // Handle odd amounts
+        // Split fees between lottery and auction based on LOTTERY_PERCENT
+        uint256 lotteryShare = (feesToDistribute * LOTTERY_PERCENT) / 100;
+        uint256 auctionShare = feesToDistribute - lotteryShare;
         _executeLotteryInternal(lotteryShare);
         _startAuction(auctionShare);
     }
@@ -865,9 +866,9 @@ contract Strategy is ERC20, ReentrancyGuardTransient {
             "Insufficient fees to distribute"
         );
 
-        // Split fees 50/50 between lottery and auction
-        uint256 lotteryShare = feesToDistribute / 2;
-        uint256 auctionShare = feesToDistribute - lotteryShare; // Handle odd amounts
+        // Split fees between lottery and auction based on LOTTERY_PERCENT
+        uint256 lotteryShare = (feesToDistribute * LOTTERY_PERCENT) / 100;
+        uint256 auctionShare = feesToDistribute - lotteryShare;
         _executeLotteryInternal(lotteryShare);
         _startAuction(auctionShare);
     }

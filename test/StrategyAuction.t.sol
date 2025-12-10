@@ -294,9 +294,10 @@ contract StrategyAuctionTest is Test {
 
         giga.executeLottery();
 
-        // Verify auction has half the fees (0.595 tokens)
+        // Verify auction has (100 - LOTTERY_PERCENT)% of fees
         (, , , uint112 auctionAmount, ) = giga.currentAuction();
-        assertEq(auctionAmount, 0.595 ether, "Auction should have 0.595 tokens");
+        uint256 expectedAuctionAmount = (totalFees * (100 - giga.LOTTERY_PERCENT())) / 100;
+        assertEq(auctionAmount, expectedAuctionAmount, "Auction should have correct percentage of fees");
     }
 
     function testMinimumBidCalculation() public {
@@ -334,8 +335,9 @@ contract StrategyAuctionTest is Test {
         (, , uint96 minBid, uint112 auctionAmount, ) = giga.currentAuction();
 
         // After transfer: 0.01 GIGA fee generated
-        // Split 50/50: 0.005 GIGA for lottery, 0.005 GIGA for auction
-        assertEq(auctionAmount, 0.005 ether, "Auction should be for 0.005 GIGA");
+        // Split based on LOTTERY_PERCENT: lottery gets LOTTERY_PERCENT%, auction gets rest
+        uint256 expectedAuctionAmount = (0.01 ether * (100 - giga.LOTTERY_PERCENT())) / 100;
+        assertEq(auctionAmount, expectedAuctionAmount, "Auction should have correct percentage of fees");
 
         // Calculate expected minimum bid with new formula
         // MinBid = (megaBalance * auctionAmount) / (2 * totalSupply)
@@ -347,7 +349,6 @@ contract StrategyAuctionTest is Test {
             expectedMinBid,
             "Minimum bid should match calculated value"
         );
-        assertEq(minBid, 0.0025 ether, "Minimum bid should be 0.0025 MEGA");
 
         // Verify that bidding exactly the minimum bid works
         placeBid(alice, minBid);
@@ -447,8 +448,9 @@ contract StrategyAuctionTest is Test {
         uint256 megaBalance = giga.getMegaReserve();
         uint256 totalSupply = giga.totalSupply();
 
-        // The auction should have 0.0035 GIGA (half of 0.007)
-        assertEq(auctionAmount, 0.0035 ether, "Auction should have 0.0035 GIGA");
+        // The auction should have (100 - LOTTERY_PERCENT)% of 0.007 GIGA
+        uint256 expectedAuctionAmount = (0.007 ether * (100 - giga.LOTTERY_PERCENT())) / 100;
+        assertEq(auctionAmount, expectedAuctionAmount, "Auction should have correct percentage of fees");
 
         // Calculate with new formula
         uint256 expectedMinBid = (megaBalance * auctionAmount) /
